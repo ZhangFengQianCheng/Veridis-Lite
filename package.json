@@ -1,0 +1,12 @@
+{
+  "name": "veridis-lite",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node --test tests/core.mjs tests/runtime.mjs",
+    "test:ui": "node tests/ui.mjs"
+  },
+  "devDependencies": { "playwright": "1.62.1" },
+  "engines": { "node": ">=22" }
+}

@@ -1,0 +1,39 @@
+import { extension_settings, getContext } from '../../../extensions.js';
+import { eventSource, event_types, saveSettingsDebounced } from '../../../../script.js';
+import { SETTINGS_KEY, loadState } from './src/model.js';
+import { createMessageCleaner } from './src/runtime.js';
+import { createUI } from './src/ui.js';
+
+const notify = (message, kind = 'info') => {
+    const api = globalThis.toastr;
+    if (typeof api?.[kind] === 'function') api[kind](message, 'Veridis Lite');
+    else console[kind === 'error' ? 'error' : 'warn']('[Veridis Lite]', message);
+};
+
+try {
+    const state = loadState(extension_settings[SETTINGS_KEY]);
+    const save = () => { extension_settings[SETTINGS_KEY] = state; saveSettingsDebounced(); };
+    const ui = createUI({ state, save, notify });
+    createMessageCleaner({ getContext, getState: () => state, eventSource, eventTypes: event_types, notify });
+    const mount = () => {
+        const menu = document.getElementById('extensionsMenu');
+        if (menu && !document.getElementById('vrl-launcher')) {
+            const button = document.createElement('div');
+            button.id = 'vrl-launcher'; button.className = 'list-group-item flex-container flexGap5 interactable';
+            button.tabIndex = 0; button.setAttribute('role', 'button');
+            button.innerHTML = '<span class="fa-solid fa-filter extensionsMenuExtensionButton"></span><span>词汇净化 · 精简版</span>';
+            button.addEventListener('click', ui.open);
+            button.addEventListener('keydown', e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); ui.open(); } });
+            menu.append(button);
+        }
+        const settings = document.getElementById('extensions_settings2') || document.getElementById('extensions_settings');
+        if (settings && !document.getElementById('vrl-settings')) {
+            const row = document.createElement('div'); row.id = 'vrl-settings'; row.className = 'extension_container';
+            const button = document.createElement('button'); button.type = 'button'; button.className = 'menu_button'; button.textContent = '词汇净化 · 精简版';
+            button.addEventListener('click', ui.open); row.append(button); settings.append(row);
+        }
+    };
+    if (event_types.APP_READY) eventSource.on(event_types.APP_READY, mount);
+    if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', mount, { once: true });
+    else mount();
+} catch (error) { notify(`加载失败：${error.message}`, 'error'); }
