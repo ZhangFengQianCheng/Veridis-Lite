@@ -94,7 +94,6 @@ export function createUI({ state, save, notify, cleanRecent, showComparison }) {
         const groups = current?.rules ?? [];
         const rules = groups.flatMap(g => g.subRules);
         main.querySelector('#vrl-stats').textContent = `${groups.length} 个规则组 · ${rules.length} 条规则`;
-        main.querySelector('#vrl-state-label').textContent = state.enabled ? '自动开启' : '自动暂停';
         main.querySelector('#vrl-saved').textContent = '自动保存';
         for (const action of ['rename-preset', 'export', 'delete-preset', 'add-group', 'search', 'edit-groups', 'reverse']) {
             main.querySelector('[data-action="' + action + '"]').disabled = !current;
@@ -270,10 +269,20 @@ export function createUI({ state, save, notify, cleanRecent, showComparison }) {
 
     function open() {
         if (!main) {
-            main = dialog('vrl-main-dialog', `<header class="vrl-main-header"><div class="vrl-brand"><span class="vrl-brand-mark">${icon('filter')}</span><div><h2>词汇净化 <span>Lite</span></h2><p>管理预设和替换规则</p></div></div><div class="vrl-header-actions"><label class="vrl-switch" title="控制新回复的自动净化；手动刷新仍可使用"><input id="vrl-enabled" type="checkbox"><span id="vrl-state-label">自动开启</span></label>${button('close', icon('xmark'), 'class="vrl-icon" aria-label="关闭词汇净化"')}</div></header>
-                <div class="vrl-main-scroll"><section class="vrl-preset-section"><div class="vrl-preset-line"><label class="vrl-preset-label" for="vrl-preset">当前预设</label><select id="vrl-preset" aria-label="当前预设"></select><span id="vrl-stats" class="vrl-muted"></span></div><div class="vrl-preset-actions">
+            main = dialog('vrl-main-dialog', `<header class="vrl-main-header">
+                <div class="vrl-brand"><span class="vrl-brand-mark">${icon('filter')}</span><div><h2>词汇净化 <span>Lite</span></h2><p>管理预设和替换规则</p></div></div>
+                <div class="vrl-header-actions">
+                    <label class="vrl-switch" title="新回复完成后自动净化。关闭后仍可手动净化十楼。">
+                        <input id="vrl-enabled" type="checkbox" role="switch">
+                        <span class="vrl-switch-track" aria-hidden="true"></span>
+                        <span class="vrl-switch-text">自动净化</span>
+                    </label>
+                    ${button('close', icon('xmark'), 'class="vrl-icon" aria-label="关闭词汇净化"')}
+                </div>
+            </header>
+                <div class="vrl-main-scroll"><section class="vrl-preset-section"><div class="vrl-preset-bar"><label class="vrl-preset-label" for="vrl-preset">当前预设</label><select id="vrl-preset" aria-label="当前预设"></select><span id="vrl-stats" class="vrl-muted"></span><div class="vrl-preset-actions">
                     ${button('new-preset', `${icon('plus')} 新建`)}${button('rename-preset', `${icon('pen-to-square')} 重命名`)}${button('import', `${icon('file-import')} 导入`)}${button('export', `${icon('file-export')} 导出`)}${button('delete-preset', `${icon('trash-can')} 删除`, 'class="vrl-danger"')}
-                </div></section><section class="vrl-rules-section"><div class="vrl-section-title"><h3>规则集</h3><div class="vrl-rule-actions">${button('add-group', `${icon('plus')} 添加`, 'class="vrl-primary"')}${button('search', `${icon('magnifying-glass')} 搜索`)}${button('edit-groups', `${icon('pen-to-square')} 编辑分组`)}${button('reverse', `${icon('arrow-down-up-across-line')} 反序排列`)}</div></div>
+                </div></div></section><section class="vrl-rules-section"><div class="vrl-section-title"><h3>规则集</h3><div class="vrl-rule-actions">${button('add-group', `${icon('plus')} 添加`, 'class="vrl-primary"')}${button('search', `${icon('magnifying-glass')} 搜索`)}${button('edit-groups', `${icon('pen-to-square')} 编辑分组`)}${button('reverse', `${icon('arrow-down-up-across-line')} 反序排列`)}</div></div>
                     <div id="vrl-search-wrap" class="vrl-search" hidden><input id="vrl-search" type="search" placeholder="搜索匹配词、替换词、备注或分组" aria-label="搜索规则">${button('clear-search', icon('xmark'), 'class="vrl-icon" aria-label="清空搜索"')}</div>
                     <div id="vrl-groups"></div></section></div><footer class="vrl-main-footer"><div class="vrl-refresh-control"><div class="vrl-clean-actions">${button('refresh-body', `${icon('rotate-right')} 净化十楼`, 'class="vrl-primary" title="用当前规则净化最近十条助手回复，各自只处理当前 Swipe"')}${button('show-comparison', '查看改动', 'title="查看最近十楼的净化前后对比"')}</div><span id="vrl-refresh-status" role="status">最近十条助手回复 · 当前 Swipe</span></div><div class="vrl-footer-meta"><span id="vrl-saved">自动保存</span><a href="https://github.com/The-Veridis-Lion/Veridis-Rewrite" target="_blank" rel="noopener noreferrer">基于 Veridis Rewrite</a></div></footer><input type="file" id="vrl-file" accept="application/json,.json" hidden>`);
             main.addEventListener('click', event => { const target = event.target.closest('button[data-action]'); if (target && !target.disabled) handleAction(target.dataset.action, target); });

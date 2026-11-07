@@ -133,6 +133,19 @@ try{
 
     await click('add-group');await nameDialog().locator('input').fill('标点与口癖');await nameDialog().getByRole('button',{name:'保存',exact:true}).click();
     let card=page.locator('.vrl-card').filter({has:page.getByRole('button',{name:'标点与口癖',exact:true})});
+    await card.locator('.vrl-menu summary').click();
+    const menuBottomReachable=await card.getByRole('button',{name:'删除分组',exact:true}).evaluate(button=>{
+        const scroller=button.closest('.vrl-main-scroll');
+        scroller.scrollTop+=Math.max(0,button.getBoundingClientRect().bottom+6-scroller.getBoundingClientRect().bottom);
+        const {left,width,bottom}=button.getBoundingClientRect();
+        return button.contains(document.elementFromPoint(left+width/2,bottom-2));
+    });
+    check('empty group menu is visible down to its last action',menuBottomReachable);
+    await card.getByRole('button',{name:'复制分组',exact:true}).click({timeout:1500});
+    const copy=page.locator('.vrl-card').filter({has:page.getByRole('button',{name:'标点与口癖（副本）',exact:true})});
+    await copy.locator('.vrl-menu summary').click();
+    await copy.getByRole('button',{name:'删除分组',exact:true}).click({timeout:1500});
+    check('empty group menu actions remain clickable',await copy.count()===0);
     await card.locator('[data-action="add-rule"]').click();
     await ruleDialog().locator('[name="targets"]').fill('极其');await ruleDialog().getByRole('button',{name:'保存规则',exact:true}).click();
     check('literal delete rule saves without any rewrite prompt',(await settings()).presets.at(-1).rules.at(-1).subRules[0].replacements.length===0);
@@ -146,7 +159,7 @@ try{
     await ruleDialog().locator('[name="targets"]').fill('{非常,十分}*认真');await ruleDialog().locator('[name="replacements"]').fill('认真');await ruleDialog().getByRole('button',{name:'保存规则',exact:true}).click();
     check('all three rule modes are editable',(await settings()).presets.at(-1).rules.at(-1).subRules.map(r=>r.mode).join(',')==='text,regex,simple');
     const actionPlacement=await card.locator('.vrl-rule-row').first().evaluate(row=>{const d=row.querySelector('[data-action="delete-inline-rule"]').getBoundingClientRect(),e=row.querySelector('[data-action="edit-rule"]').getBoundingClientRect(),b=row.getBoundingClientRect();return{deleteRight:d.right,editLeft:e.left,editRight:e.right,rowRight:b.right}});
-    check('inline delete sits left of the pencil and the pencil keeps its original grid position '+JSON.stringify(actionPlacement),actionPlacement.deleteRight<=actionPlacement.editLeft&&Math.abs(actionPlacement.editLeft-(actionPlacement.rowRight-34))<2);
+    check('inline delete sits left of the pencil and the pencil stays at the row right edge '+JSON.stringify(actionPlacement),actionPlacement.deleteRight<=actionPlacement.editLeft&&actionPlacement.rowRight-actionPlacement.editRight>=0&&actionPlacement.rowRight-actionPlacement.editRight<=12);
     await card.locator('[data-action="add-rule"]').click();await ruleDialog().locator('[name="targets"]').fill('临时删除示例');await ruleDialog().getByRole('button',{name:'保存规则',exact:true}).click();
     await card.getByRole('button',{name:'删除规则 临时删除示例',exact:true}).click();
     check('inline rule deletion is saved immediately',(await settings()).presets.at(-1).rules.at(-1).subRules.length===3);
@@ -168,7 +181,11 @@ try{
 
     const before=JSON.stringify(await settings());await page.locator('#vrl-file').setInputFiles({name:'invalid.json',mimeType:'application/json',buffer:Buffer.from('{broken')});
     await page.waitForFunction(()=>window.__notices.at(-1).kind==='error');check('invalid imports leave working presets intact',JSON.stringify(await settings())===before);
-    await page.locator('#vrl-enabled').uncheck();check('master switch persists',!(await settings()).enabled);await page.locator('#vrl-enabled').check();
+    const autoSwitch=page.getByRole('switch',{name:'自动净化',exact:true});
+    await autoSwitch.focus();await page.keyboard.press('Space');
+    const disabledByKeyboard=!(await settings()).enabled&&!(await autoSwitch.isChecked());
+    await page.getByText('自动净化',{exact:true}).click();
+    check('automatic cleanup switch persists with keyboard and label activation',disabledByKeyboard&&(await settings()).enabled&&await autoSwitch.isChecked());
 
     await click('new-preset');await nameDialog().locator('input').fill('空白预设');await nameDialog().getByRole('button',{name:'保存',exact:true}).click();
     check('new preset starts empty',(await settings()).presets.at(-1).rules.length===0);
@@ -196,7 +213,24 @@ try{
     await ruleDialog().locator('[data-action="close"]').first().click();
     await page.setViewportSize({width:1360,height:960});
     await page.evaluate(()=>{document.documentElement.style.setProperty('--SmartThemeBlurTintColor','#faf9f6');document.documentElement.style.setProperty('--SmartThemeBodyColor','#292c25');document.documentElement.style.setProperty('--SmartThemeBorderColor','#deddd5');document.documentElement.style.setProperty('--SmartThemeQuoteColor','#86661e')});
+    await page.waitForTimeout(350);
     await page.screenshot({path:path.join(output,'light-preview.png')});
+    const primaryContrast=await page.locator('.vrl-main-dialog [data-action="refresh-body"]').evaluate(button=>{
+        const canvas=document.createElement('canvas');canvas.width=canvas.height=1;
+        const ctx=canvas.getContext('2d');
+        function luminance(color){
+            ctx.clearRect(0,0,1,1);ctx.fillStyle=color;ctx.fillRect(0,0,1,1);
+            const channels=Array.from(ctx.getImageData(0,0,1,1).data).slice(0,3).map(byte=>{
+                const value=byte/255;
+                return value<=0.04045?value/12.92:((value+0.055)/1.055)**2.4;
+            });
+            return channels[0]*0.2126+channels[1]*0.7152+channels[2]*0.0722;
+        }
+        const {color,backgroundColor}=getComputedStyle(button);
+        const [dark,light]=[luminance(color),luminance(backgroundColor)].sort((a,b)=>a-b);
+        return (light+0.05)/(dark+0.05);
+    });
+    check(`light theme primary button contrast is readable (${primaryContrast.toFixed(2)}:1)`,primaryContrast>=4.5);
     check('no uncaught browser errors',errors.length===0);
     console.log(JSON.stringify({checks:checks.length,results:checks,errors,scope:'headless Chromium; real extension source; simulated host and storage; no model calls or desktop control'},null,2));
 }finally{
