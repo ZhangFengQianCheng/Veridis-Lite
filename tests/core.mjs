@@ -114,3 +114,36 @@ test('a saved comparison follows its Swipe when an earlier candidate is deleted'
     writeHistory(message,branchOf(message),'甲','乙',1);message.swipes.splice(0,1);message.swipe_info.splice(0,1);message.swipe_id=0;
     assert.equal(getHistory(message).before,'甲');assert.equal(getHistory(message).after,'乙');
 });
+test('snippets stop at sentence boundaries and exclude unchanged neighbouring sentences',()=>{
+    const before='她换好衣服。鞋面沾上泥星，随后走到出口。守卫叫她停下。';
+    const after=before.replace('泥星','污泥');const output=renderComparison(getTextDiffOperations(before,after));
+    assert.ok(output.includes('鞋面沾上'));assert.ok(output.includes('随后走到出口。'));
+    assert.ok(!output.includes('她换好衣服'));assert.ok(!output.includes('守卫叫她停下'));
+    assert.equal((output.match(/class="vrl-diff-fragment"/g)||[]).length,1);
+});
+test('several edits in one sentence are displayed together once',()=>{
+    const output=renderComparison(getTextDiffOperations('刚才，他非常认真地检查泥星。','方才，他认真地检查污泥。'));
+    assert.equal((output.match(/class="vrl-diff-fragment"/g)||[]).length,1);
+    assert.ok(output.includes('<del>'));assert.ok(output.includes('<ins>'));
+});
+test('long changed sentences are not clipped to a fixed character count',()=>{
+    const start='没有句号的前文'.repeat(18),end='句尾的内容'.repeat(18)+'。';
+    const output=renderComparison(getTextDiffOperations(start+'甲'+end+'无关下一句。',start+'乙'+end+'无关下一句。'));
+    assert.ok(output.includes(start));assert.ok(output.includes(end));assert.ok(!output.includes('无关下一句'));
+});
+test('changed sentences remain separate across an unchanged middle sentence',()=>{
+    const output=renderComparison(getTextDiffOperations('甲句。中间没有改动。乙句。','丙句。中间没有改动。丁句。'));
+    assert.equal((output.match(/class="vrl-diff-fragment"/g)||[]).length,2);assert.ok(!output.includes('中间没有改动'));
+});
+test('sentence snippets retain closing quotes and respect newlines and decimal numbers',()=>{
+    for(const [before,after,included,excluded] of [
+        ['他说：“甲。”她走开了。','他说：“乙。”她走开了。','。”','她走开了'],
+        ['甲行\n下一行不变','乙行\n下一行不变','行','下一行不变'],
+        ['Value 3.14 is bad. Another sentence.','Value 3.14 is good. Another sentence.','Value 3.14 is','Another sentence'],
+    ]){const output=renderComparison(getTextDiffOperations(before,after));assert.ok(output.includes(included));assert.ok(!output.includes(excluded));}
+});
+test('punctuation replacements stay paired and full comparison keeps untouched sentences',()=>{
+    const ops=getTextDiffOperations('第一句。下一句不变。','第一句！下一句不变。');
+    const snippet=renderComparison(ops);assert.ok(snippet.includes('<del>。</del>'));assert.ok(snippet.includes('<ins>！</ins>'));assert.ok(!snippet.includes('下一句不变'));
+    assert.ok(renderComparison(ops,'full').includes('下一句不变'));
+});

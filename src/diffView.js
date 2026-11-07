@@ -5,15 +5,35 @@ export function renderComparison(operations, mode = 'snippet') {
     const run = op => op.type === 'delete' ? `<del>${escapeHtml(op.text)}</del>`
         : op.type === 'insert' ? `<ins>${escapeHtml(op.text)}</ins>` : escapeHtml(op.text);
     if (mode === 'full') return `<div class="vrl-diff-prose">${operations.map(run).join('')}</div>`;
+    // Split the complete aligned diff into sentences, then show only changed
+    // sentences. A replacement's adjacent delete/insert runs remain together.
+    const tokens = operations.flatMap(op => Array.from(op.text).map(char => ({ type: op.type, char })));
     const blocks = [];
-    for (let i = 0; i < operations.length; i++) {
-        if (operations[i].type === 'equal') continue;
-        const previous = operations[i - 1]?.type === 'equal' ? Array.from(operations[i - 1].text).slice(-45).join('') : '';
-        const changed = [];
-        while (i < operations.length && operations[i].type !== 'equal') changed.push(operations[i++]);
-        const next = operations[i]?.type === 'equal' ? Array.from(operations[i].text).slice(0, 45).join('') : '';
-        blocks.push(`<div class="vrl-diff-fragment">${escapeHtml(previous)}${changed.map(run).join('')}${escapeHtml(next)}</div>`);
+    let parts = [], boundary = false, previousType = null;
+    const endMark = (token, index) => {
+        if (/[。！？!?\r\n]/u.test(token.char)) return true;
+        if (token.char !== '.') return false;
+        const before = tokens[index - 1]?.char, after = tokens[index + 1]?.char;
+        return before !== '.' && after !== '.' && !(/\d/u.test(before || '') && /\d/u.test(after || ''))
+            && (!after || /[\s"'”’」』）)\]]/u.test(after));
+    };
+    const flush = () => {
+        if (parts.some(part => part.type !== 'equal')) {
+            if (parts[0]?.type === 'equal') parts[0].text = parts[0].text.replace(/^\s+/u, '');
+            if (parts.at(-1)?.type === 'equal') parts.at(-1).text = parts.at(-1).text.replace(/\s+$/u, '');
+            blocks.push(`<div class="vrl-diff-fragment">${parts.map(run).join('')}</div>`);
+        }
+        parts = []; boundary = false;
+    };
+    for (const [index, token] of tokens.entries()) {
+        const trailing = /[\s。！？!?.”’」』）)\]}"'*`]/u.test(token.char);
+        if (boundary && !trailing && (token.type === 'equal' || previousType === 'equal')) flush();
+        if (parts.at(-1)?.type === token.type) parts.at(-1).text += token.char;
+        else parts.push({ type: token.type, text: token.char });
+        if (endMark(token, index)) boundary = true;
+        previousType = token.type;
     }
+    flush();
     return blocks.join('') || '<p class="vrl-diff-empty">这条记录没有可见正文差异。</p>';
 }
 
