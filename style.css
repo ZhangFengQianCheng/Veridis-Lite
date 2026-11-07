@@ -181,7 +181,7 @@
 .vrl-main-footer a { color: inherit; text-decoration: none; margin-left: auto; }
 .vrl-main-footer a:hover { text-decoration: underline; color: var(--vrl-text); }
 .vrl-rule-dialog { width: 580px; }
-.vrl-rule-dialog form, .vrl-name-dialog form { display: flex; flex-direction: column; min-height: 0; }
+.vrl-rule-dialog form, .vrl-name-dialog form, .vrl-settings-dialog form { display: flex; flex-direction: column; min-height: 0; }
 .vrl-form-body { min-height: 0; overflow-y: auto; padding: 18px 22px; display: flex; flex-direction: column; gap: 16px; }
 .vrl-field { display: block; font-size: 13px; font-weight: 600; }
 .vrl-field > input, .vrl-field > textarea, .vrl-field > select { display: block; margin-top: 7px !important; font-weight: 400; }
@@ -194,8 +194,9 @@
 .vrl-dialog .vrl-error, .vrl-rule-source small.vrl-error { color: var(--vrl-danger); font-size: 12px; }
 .vrl-dialog .vrl-error:empty { display: none; }
 .vrl-push-left { margin-right: auto; }
-.vrl-name-dialog { width: 420px; }
+.vrl-name-dialog, .vrl-settings-dialog { width: 420px; }
 .vrl-name-dialog .vrl-field { padding: 20px 22px; }
+.vrl-settings-dialog .vrl-hint { margin-top: 7px; }
 .vrl-groups-dialog { width: 720px; }
 .vrl-group-editor { overflow-y: auto; padding: 10px 20px; }
 .vrl-group-edit-row { display: flex; align-items: center; gap: 8px; padding: 10px 0; border-bottom: 1px solid var(--vrl-line); }

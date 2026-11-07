@@ -18,6 +18,7 @@ const icon = name => {
         'arrow-down': '<path d="M12 3v18m-7-7 7 7 7-7"/>',
         'arrow-down-up-across-line': '<path d="M7 3v18m-4-4 4 4 4-4M17 21V3m-4 4 4-4 4 4"/>',
         'rotate-right': '<path d="M20 7v5h-5M20 12a8 8 0 1 0-2 6M20 7l-3 3"/>',
+        gear: '<path d="M10 3h4l.6 2.5 1.7 1 2.5-.7 2 3.4-1.9 1.8v2l1.9 1.8-2 3.4-2.5-.7-1.7 1L14 21h-4l-.6-2.5-1.7-1-2.5.7-2-3.4L5.1 13v-2L3.2 9.2l2-3.4 2.5.7 1.7-1L10 3Z"/><circle cx="12" cy="12" r="3"/>',
     };
     return `<svg class="vrl-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${paths[name] || paths.plus}</svg>`;
 };
@@ -40,6 +41,7 @@ export function createUI({ state, save, notify, cleanRecent, showComparison }) {
     const preset = () => activePreset(state);
     const groupById = groupId => preset()?.rules.find(g => g.id === groupId);
     const persist = () => { save(); if (main?.open) render(); };
+    const cleanupHint = () => `最近 ${state.manualCleanLimit ?? 1} 条助手回复 · 当前 Swipe`;
 
     function groupCard(group) {
         const query = search.trim().toLocaleLowerCase();
@@ -100,6 +102,47 @@ export function createUI({ state, save, notify, cleanRecent, showComparison }) {
         }
         if (!current) main.querySelector('#vrl-search-wrap').hidden = true;
         renderGroups();
+    }
+
+    function openSettings() {
+        const modal = dialog('vrl-settings-dialog', `<form>
+            <header><h3 id="vrl-settings-title">设置</h3></header>
+            <div class="vrl-form-body">
+                <label class="vrl-switch">
+                    <input name="showInMagicWand" type="checkbox" role="switch">
+                    <span class="vrl-switch-track" aria-hidden="true"></span>
+                    <span class="vrl-switch-text">显示在魔法棒</span>
+                </label>
+                <div>
+                    <label class="vrl-field">手动净化楼层数
+                        <input name="manualCleanLimit" type="number" min="1" step="1" max="${Number.MAX_SAFE_INTEGER}" inputmode="numeric" placeholder="1" aria-describedby="vrl-clean-limit-hint">
+                    </label>
+                    <p class="vrl-hint" id="vrl-clean-limit-hint">填写正整数。留空时净化最近 1 条助手回复。</p>
+                </div>
+            </div>
+            <footer>${button('cancel', '取消')}<button type="submit" class="vrl-primary">保存</button></footer>
+        </form>`);
+        modal.setAttribute('aria-labelledby', 'vrl-settings-title');
+        const form = modal.querySelector('form');
+        const launcherToggle = form.elements.showInMagicWand;
+        const floorCount = form.elements.manualCleanLimit;
+        launcherToggle.checked = state.showInMagicWand;
+        floorCount.value = state.manualCleanLimit ?? '';
+        modal.querySelector('[data-action="cancel"]').onclick = () => modal.close();
+        form.onsubmit = event => {
+            event.preventDefault();
+            state.showInMagicWand = launcherToggle.checked;
+            state.manualCleanLimit = floorCount.value === '' ? null : floorCount.valueAsNumber;
+            save();
+            if (!main.querySelector('[data-action="refresh-body"]').disabled) {
+                const status = main.querySelector('#vrl-refresh-status');
+                status.textContent = cleanupHint();
+                status.classList.remove('vrl-error');
+            }
+            modal.close();
+        };
+        modal.addEventListener('close', () => modal.remove(), { once: true });
+        modal.showModal();
     }
 
     function askName(title, initial, commit) {
@@ -210,6 +253,7 @@ export function createUI({ state, save, notify, cleanRecent, showComparison }) {
 
     function handleAction(action, target) {
         if (action === 'close') main.close();
+        if (action === 'settings') openSettings();
         if (action === 'refresh-body') {
             if (target.disabled) return;
             const previous = target.innerHTML;
@@ -272,11 +316,12 @@ export function createUI({ state, save, notify, cleanRecent, showComparison }) {
             main = dialog('vrl-main-dialog', `<header class="vrl-main-header">
                 <div class="vrl-brand"><span class="vrl-brand-mark">${icon('filter')}</span><div><h2>词汇净化 <span>Lite</span></h2><p>管理预设和替换规则</p></div></div>
                 <div class="vrl-header-actions">
-                    <label class="vrl-switch" title="新回复完成后自动净化。关闭后仍可手动净化十楼。">
+                    <label class="vrl-switch" title="新回复完成后自动净化。关闭后仍可立即净化。">
                         <input id="vrl-enabled" type="checkbox" role="switch">
                         <span class="vrl-switch-track" aria-hidden="true"></span>
                         <span class="vrl-switch-text">自动净化</span>
                     </label>
+                    ${button('settings', icon('gear'), 'class="vrl-icon" aria-label="设置" title="设置"')}
                     ${button('close', icon('xmark'), 'class="vrl-icon" aria-label="关闭词汇净化"')}
                 </div>
             </header>
@@ -284,7 +329,7 @@ export function createUI({ state, save, notify, cleanRecent, showComparison }) {
                     ${button('new-preset', `${icon('plus')} 新建`)}${button('rename-preset', `${icon('pen-to-square')} 重命名`)}${button('import', `${icon('file-import')} 导入`)}${button('export', `${icon('file-export')} 导出`)}${button('delete-preset', `${icon('trash-can')} 删除`, 'class="vrl-danger"')}
                 </div></div></section><section class="vrl-rules-section"><div class="vrl-section-title"><h3>规则集</h3><div class="vrl-rule-actions">${button('add-group', `${icon('plus')} 添加`, 'class="vrl-primary"')}${button('search', `${icon('magnifying-glass')} 搜索`)}${button('edit-groups', `${icon('pen-to-square')} 编辑分组`)}${button('reverse', `${icon('arrow-down-up-across-line')} 反序排列`)}</div></div>
                     <div id="vrl-search-wrap" class="vrl-search" hidden><input id="vrl-search" type="search" placeholder="搜索匹配词、替换词、备注或分组" aria-label="搜索规则">${button('clear-search', icon('xmark'), 'class="vrl-icon" aria-label="清空搜索"')}</div>
-                    <div id="vrl-groups"></div></section></div><footer class="vrl-main-footer"><div class="vrl-refresh-control"><div class="vrl-clean-actions">${button('refresh-body', `${icon('rotate-right')} 净化十楼`, 'class="vrl-primary" title="用当前规则净化最近十条助手回复，各自只处理当前 Swipe"')}${button('show-comparison', '查看改动', 'title="查看最近十楼的净化前后对比"')}</div><span id="vrl-refresh-status" role="status">最近十条助手回复 · 当前 Swipe</span></div><div class="vrl-footer-meta"><span id="vrl-saved">自动保存</span><a href="https://github.com/The-Veridis-Lion/Veridis-Rewrite" target="_blank" rel="noopener noreferrer">基于 Veridis Rewrite</a></div></footer><input type="file" id="vrl-file" accept="application/json,.json" hidden>`);
+                    <div id="vrl-groups"></div></section></div><footer class="vrl-main-footer"><div class="vrl-refresh-control"><div class="vrl-clean-actions">${button('refresh-body', `${icon('rotate-right')} 立即净化`, 'class="vrl-primary" title="按设置的楼层数净化最近的助手回复，只处理当前 Swipe"')}${button('show-comparison', '查看改动', 'title="查看最近十楼的净化前后对比"')}</div><span id="vrl-refresh-status" role="status">${cleanupHint()}</span></div><div class="vrl-footer-meta"><span id="vrl-saved">自动保存</span><a href="https://github.com/The-Veridis-Lion/Veridis-Rewrite" target="_blank" rel="noopener noreferrer">基于 Veridis Rewrite</a></div></footer><input type="file" id="vrl-file" accept="application/json,.json" hidden>`);
             main.addEventListener('click', event => { const target = event.target.closest('button[data-action]'); if (target && !target.disabled) handleAction(target.dataset.action, target); });
             main.addEventListener('change', event => {
                 const input = event.target;

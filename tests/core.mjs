@@ -80,16 +80,23 @@ test('multiline literals and replacements survive JSON round trips', () => {
 });
 test('own settings are independent and preset names stay unique', () => {
     const empty = createState();
-    assert.deepEqual(empty, { version: 1, enabled: true, activePresetId: null, presets: [] });
+    assert.deepEqual(empty, { version: 1, enabled: true, showInMagicWand: true, manualCleanLimit: null, activePresetId: null, presets: [] });
     assert.deepEqual(loadState(undefined), empty);
     const paused = { ...empty, enabled: false };
     assert.deepEqual(loadState(paused), paused);
     assert.equal(activePreset(empty), undefined);
     const preset = { id: 'fixture-preset', name: '测试预设', rules: [] };
-    const state = { ...empty, activePresetId: preset.id, presets: [preset] };
+    const state = { version: 1, enabled: false, activePresetId: preset.id, presets: [preset] };
     assert.deepEqual(activePreset(state), preset);
     assert.equal(uniqueName(state, '测试预设'), '测试预设 (2)');
-    const restored=loadState(state);assert.deepEqual(restored,state);assert.notEqual(restored,state);
+    const restored = loadState(state);
+    assert.deepEqual(restored, { ...empty, ...state });
+    assert.notEqual(restored, state);
+    const configured = { ...restored, showInMagicWand: false, manualCleanLimit: 12 };
+    assert.deepEqual(loadState(configured), configured);
+    for (const invalid of [0, -1, 1.5, '12', Number.MAX_SAFE_INTEGER + 1]) {
+        assert.equal(loadState({ ...configured, manualCleanLimit: invalid }).manualCleanLimit, null);
+    }
     assert.throws(()=>loadState({presets:[{}]}));
 });
 test('exact diff reconstructs both sides including repeated text, emoji and whitespace',()=>{

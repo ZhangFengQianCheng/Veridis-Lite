@@ -1,4 +1,4 @@
-import { activePreset } from './model.js';
+import { activePreset, normalizeManualCleanLimit } from './model.js';
 import { applyRules, compileRules } from './engine.js';
 import { assistant, branchOf, getHistory, pruneHistory, recentAssistantIndices, syncSwipe, writeHistory } from './history.js';
 import { refreshDisplay } from './display.js';
@@ -8,6 +8,7 @@ export function createMessageCleaner({ getContext, getState, eventSource, eventT
     let active = false, timer = null, continuation = null, disposed = false, draining = false, manualRunning = false, drainPromise = null;
     const identity = ctx => String(ctx.getCurrentChatId?.() ?? ctx.chatId ?? ctx.chat_id ?? '');
     const on = (key, fn) => { if (eventTypes[key]) { eventSource.on(eventTypes[key], fn); listeners.push([eventTypes[key], fn]); } };
+    const configuredLimit = () => normalizeManualCleanLimit(getState().manualCleanLimit) ?? 1;
     const memory = (message, branch) => runs.get(message)?.get(branch.key);
     const sourceFor = (message, branch) => {
         const saved = getHistory(message, branch), cached = memory(message, branch);
@@ -36,7 +37,7 @@ export function createMessageCleaner({ getContext, getState, eventSource, eventT
         message.mes = result.text;
         syncSwipe(message, branch);
         const historyChanged = writeHistory(message, branch, source, result.text, result.changes);
-        const pruned = pruneHistory(ctx.chat);
+        const pruned = !manual && pruneHistory(ctx.chat, configuredLimit());
         let dirty = historyChanged || pruned || textChanged || retrySave;
         const record = { source, output: result.text, persisted: !dirty };
         if (!runs.has(message)) runs.set(message, new Map());
@@ -63,13 +64,14 @@ export function createMessageCleaner({ getContext, getState, eventSource, eventT
             message: displayFailed ? '正文已保存，渲染通知失败，可稍后重试。' : '' };
     }
 
-    async function cleanRecent({ limit = 10, onProgress = () => {} } = {}) {
+    async function cleanRecent({ limit = configuredLimit(), onProgress = () => {} } = {}) {
         const ctx = getContext();
         if (disposed) return { status: 'error', message: '扩展已卸载，请刷新页面。' };
         if (active || draining || manualRunning || ctx.streamingProcessor?.isStopped === false) return { status: 'busy', message: '请等当前回复生成或保存完成后再净化。' };
         const preset = activePreset(getState());
         if (!preset) return { status: 'empty', message: '请先新建或导入预设。' };
-        const indices = recentAssistantIndices(ctx.chat, Math.min(10, Math.max(1, limit)));
+        const count = normalizeManualCleanLimit(limit) ?? 1;
+        const indices = recentAssistantIndices(ctx.chat, count);
         if (!indices.length) return { status: 'empty', message: '当前聊天还没有可净化的助手回复。' };
         const compiled = compileRules(structuredClone(preset.rules));
         if (compiled.errors.length) return { status: 'error', message: '有 ' + compiled.errors.length + ' 条无效规则，请先修正后再净化。' };
@@ -96,6 +98,7 @@ export function createMessageCleaner({ getContext, getState, eventSource, eventT
                 if (result.status === 'stale') skipped++;
             }
             if (!sameChat(valid[0])) return { status: 'stale', message: '会话已切换，已停止后续保存。', changed, skipped };
+            if (records.length) dirty = pruneHistory(ctx.chat, Math.max(count, configuredLimit())) || dirty;
             if (dirty) {
                 try { await ctx.saveChat(); records.forEach(record => { record.persisted = true; }); }
                 catch { return { status: 'save-failed', message: '正文已更新，但保存失败，请检查酒馆服务后重试。', changed, changes }; }

@@ -51,6 +51,10 @@ const settings=()=>page.evaluate(()=>window.__host.extension_settings.veridis_li
 const click=action=>page.locator(`.vrl-main-dialog [data-action="${action}"]`).first().click();
 const nameDialog=()=>page.locator('.vrl-name-dialog');
 const ruleDialog=()=>page.locator('.vrl-rule-dialog');
+const preferences = page.getByRole('dialog', { name: '设置', exact: true });
+const wandSwitch = preferences.getByRole('switch', { name: '显示在魔法棒' });
+const floorCount = preferences.getByRole('spinbutton', { name: '手动净化楼层数' });
+const savePreferences = () => preferences.getByRole('button', { name: '保存', exact: true }).click();
 
 try{
     await page.goto('http://veridis-lite.test/');await page.locator('#vrl-settings .vrl-settings-entry').waitFor();
@@ -72,9 +76,27 @@ try{
     check('the first preset can be created', (await settings()).presets.length === 1);
     await click('delete-preset');
     check('deleting the last preset leaves empty settings', (await settings()).presets.length === 0 && (await settings()).activePresetId === null);
+    await click('settings');
+    check('the main panel opens settings with the wand enabled and the floor count blank',
+        await wandSwitch.isChecked() && await floorCount.inputValue() === '');
+    await wandSwitch.uncheck();
+    await floorCount.fill('0');
+    await savePreferences();
+    check('zero floors cannot be saved', await preferences.isVisible() && (await settings()).showInMagicWand);
+    await floorCount.fill('12');
+    await savePreferences();
+    check('saving settings removes the wand entry immediately', await page.locator('#vrl-launcher').count() === 0);
     await page.reload();
-    await page.locator('#vrl-launcher').click();
+    await page.locator('#vrl-settings .vrl-settings-entry').click();
     check('empty settings survive a reload', await page.locator('#vrl-preset').isDisabled() && (await settings()).presets.length === 0);
+    await click('settings');
+    check('the extensions panel still opens Lite and both settings survive reload',
+        await page.locator('#vrl-launcher').count() === 0 && !await wandSwitch.isChecked() && await floorCount.inputValue() === '12');
+    await wandSwitch.check();
+    await floorCount.fill('');
+    await savePreferences();
+    check('enabling the wand restores the entry and clearing the count restores the default',
+        await page.locator('#vrl-launcher').count() === 1 && (await settings()).manualCleanLimit === null);
     const untouched = await page.evaluate(async () => {
         const { ctx, eventSource, event_types } = window.__host;
         await eventSource.emit(event_types.GENERATION_STARTED, 'normal', {}, false);
@@ -205,9 +227,32 @@ try{
     await page.reload();await page.locator('#vrl-launcher').click();
     check('saved presets and rules survive a browser reload',(await settings()).activePresetId===chosen.id&&(await page.locator('.vrl-card').count())===2);
     await click('show-comparison');await page.locator('.vrl-diff-body del').first().waitFor();check('comparison records survive a browser reload',await page.locator('.vrl-diff-body ins').count()>0);await page.locator('.vrl-diff-dialog [data-close]').click();
-    await page.evaluate(()=>{const {ctx}=window.__host;ctx.chat=Array.from({length:24},(_,i)=>i%2?{is_user:false,mes:'极其'+i,extra:{},swipe_id:0,swipes:['极其'+i],swipe_info:[{extra:{}}]}:{is_user:true,mes:'用户极其'+i})});
-    const beforeBatch=await page.evaluate(()=>window.__saves);await click('refresh-body');await page.waitForFunction(()=>document.querySelector('#vrl-refresh-status').textContent.includes('已净化 10 楼'));
-    check('button cleans exactly ten recent assistant replies in one saved batch',await page.evaluate(previous=>window.__saves===previous+1&&window.__host.ctx.chat[1].mes==='极其1'&&window.__host.ctx.chat[3].mes==='极其3'&&window.__host.ctx.chat.filter(m=>m.is_user).every(m=>m.mes.startsWith('用户极其'))&&window.__host.ctx.chat.slice(4).filter(m=>!m.is_user).every(m=>!m.mes.includes('极其')),beforeBatch));
+    const seedChat = () => page.evaluate(() => {
+        window.__host.ctx.chat = Array.from({ length: 28 }, (_, i) => i % 2
+            ? { is_user: false, mes: '极其' + i, extra: {}, swipe_id: 0, swipes: ['极其' + i], swipe_info: [{ extra: {} }] }
+            : { is_user: true, mes: '用户极其' + i });
+    });
+    await seedChat();
+    const cleanButton = page.getByRole('button', { name: '立即净化', exact: true });
+    await cleanButton.click();
+    await page.waitForFunction(() => document.querySelector('#vrl-refresh-status').textContent.includes('已净化 1 楼'));
+    check('a blank count cleans just the latest assistant reply', await page.evaluate(() => {
+        const { chat } = window.__host.ctx;
+        return chat.at(-1).mes === '27' && chat.slice(0, -1).every(m => m.mes.includes('极其'));
+    }));
+    await click('settings');
+    await floorCount.fill('12');
+    await savePreferences();
+    await seedChat();
+    const beforeBatch = await page.evaluate(() => window.__saves);
+    await cleanButton.click();
+    await page.waitForFunction(() => document.querySelector('#vrl-refresh-status').textContent.includes('已净化 12 楼'));
+    check('the configured count selects twelve assistants in one saved batch', await page.evaluate(previous => {
+        const { chat } = window.__host.ctx;
+        return window.__saves === previous + 1 && chat[1].mes === '极其1' && chat[3].mes === '极其3'
+            && chat.filter(m => m.is_user).every(m => m.mes.startsWith('用户极其'))
+            && chat.slice(4).filter(m => !m.is_user).every(m => !m.mes.includes('极其'));
+    }, beforeBatch));
 
     for(const [width,height] of [[1920,1080],[768,1024],[390,844],[360,780]]){
         await page.setViewportSize({width,height});
@@ -216,6 +261,13 @@ try{
         if(width<=390){const rows=await page.locator('.vrl-preset-actions').evaluate(node=>[...node.children].map(child=>Math.round(child.getBoundingClientRect().top)));check(`preset actions stay on one row at ${width}px`,new Set(rows).size===1);}
         if(width===390)await page.screenshot({path:path.join(output,'mobile-preview.png')});
     }
+    await click('settings');
+    const mobileSettings = await preferences.evaluate(node => {
+        const { left, right, top, bottom } = node.getBoundingClientRect();
+        return left >= 0 && right <= innerWidth && top >= 0 && bottom <= innerHeight;
+    });
+    check('the main settings button and dialog fit the small mobile layout', mobileSettings);
+    await preferences.getByRole('button', { name: '取消', exact: true }).click();
     await page.locator('.vrl-card').first().locator('[data-action="add-rule"]').click();
     await ruleDialog().locator('[name="targets"]').fill('示例');await ruleDialog().getByRole('button',{name:'保存规则',exact:true}).scrollIntoViewIfNeeded();
     check('mobile editor save control stays reachable',await ruleDialog().getByRole('button',{name:'保存规则',exact:true}).isVisible());

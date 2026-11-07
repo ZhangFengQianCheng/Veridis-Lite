@@ -76,7 +76,7 @@ export function createDiffViewer({ getContext, eventSource, eventTypes }) {
         select.innerHTML = indices.map(index => `<option value="${index}">第 ${index + 1} 楼 · 当前 Swipe</option>`).join('');
         if (!indices.length) {
             cancel(); pair = null;
-            modal.querySelector('.vrl-diff-body').innerHTML = '<p class="vrl-diff-empty">最近十楼尚无净化记录。生成新回复或执行“净化十楼”后，实际发生的改动会显示在这里。</p>';
+            modal.querySelector('.vrl-diff-body').innerHTML = '<p class="vrl-diff-empty">最近十楼尚无净化记录。生成新回复或执行“立即净化”后，实际发生的改动会显示在这里。</p>';
             select.disabled = true; return;
         }
         select.disabled = false;

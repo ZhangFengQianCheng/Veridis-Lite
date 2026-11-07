@@ -13,13 +13,19 @@ const notify = (message, kind = 'info') => {
 
 try {
     const state = loadState(extension_settings[SETTINGS_KEY]);
-    const save = () => { extension_settings[SETTINGS_KEY] = state; saveSettingsDebounced(); };
+    const save = () => {
+        extension_settings[SETTINGS_KEY] = state;
+        saveSettingsDebounced();
+        mount();
+    };
     const viewer = createDiffViewer({ getContext, eventSource, eventTypes: event_types });
     const cleaner = createMessageCleaner({ getContext, getState: () => state, eventSource, eventTypes: event_types, notify, onChange: viewer.refresh });
     const ui = createUI({ state, save, notify, cleanRecent: cleaner.cleanRecent, showComparison: viewer.open });
     const mount = () => {
         const menu = document.getElementById('extensionsMenu');
-        if (menu && !document.getElementById('vrl-launcher')) {
+        const launcher = document.getElementById('vrl-launcher');
+        if (!state.showInMagicWand) launcher?.remove();
+        else if (menu && !launcher) {
             const button = document.createElement('div');
             button.id = 'vrl-launcher'; button.className = 'list-group-item flex-container flexGap5 interactable';
             button.tabIndex = 0; button.setAttribute('role', 'button');

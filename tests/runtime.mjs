@@ -138,13 +138,18 @@ test('a failed manual save can be retried without repeating the replacement',asy
     assert.equal((await f.cleaner.refreshLatest()).status,'save-failed');assert.equal(m.mes,'aa');let saved=0;f.host.saveChat=async()=>{saved++};
     assert.equal((await f.cleaner.refreshLatest()).status,'saved');assert.equal(m.mes,'aa');assert.equal(saved,1);f.cleaner.dispose();
 });
-test('clean ten selects the latest ten assistants and saves the whole batch once',async()=>{
-    const f=fixture('甲','乙');
-    for(let i=0;i<12;i++)f.host.chat.push({is_user:true,mes:'用户甲'},f.message('回复甲'+i));
-    const result=await f.cleaner.cleanRecent();assert.equal(result.changed,10);assert.equal(result.changes,10);assert.equal(f.saves,1);
-    assert.equal(f.host.chat[1].mes,'回复甲0');assert.equal(f.host.chat[3].mes,'回复甲1');
-    for(let i=2;i<12;i++)assert.equal(f.host.chat[i*2+1].mes,'回复乙'+i);
-    assert.ok(f.host.chat.filter(m=>m.is_user).every(m=>m.mes==='用户甲'));f.cleaner.dispose();
+test('a configured manual batch can exceed ten assistant replies and saves once', async () => {
+    const f = fixture('甲', '乙');
+    f.state.manualCleanLimit = 12;
+    for (let i = 0; i < 14; i++) f.host.chat.push({ is_user: true, mes: '用户甲' }, f.message('回复甲' + i));
+    const result = await f.cleaner.cleanRecent();
+    assert.equal(result.changed, 12);
+    assert.equal(f.saves, 1);
+    assert.equal(f.host.chat[1].mes, '回复甲0');
+    assert.equal(f.host.chat[3].mes, '回复甲1');
+    for (let i = 2; i < 14; i++) assert.equal(f.host.chat[i * 2 + 1].mes, '回复乙' + i);
+    assert.ok(f.host.chat.filter(m => m.is_user).every(m => m.mes === '用户甲'));
+    f.cleaner.dispose();
 });
 test('beautification is notified after native formatting and before saving',async()=>{
     const f=fixture('甲','乙'),events=[];f.host.chat.push(f.message('甲'));
@@ -155,10 +160,18 @@ test('manual cleanup re-notifies renderers even when there is no textual change'
     const f=fixture();f.host.chat.push(f.message('普通正文'));let renders=0;f.bus.on(types.MESSAGE_UPDATED,()=>{renders++});
     await f.cleaner.cleanRecent();assert.equal(renders,1);assert.equal(f.saves,0);f.cleaner.dispose();
 });
-test('comparison records persist across a fresh cleaner instance and retain the current Swipe',async()=>{
-    const f=fixture('a','aa'),m=f.message('a');f.host.chat.push(m);await f.cleaner.cleanRecent();f.cleaner.dispose();
-    const fresh=createMessageCleaner({getContext:()=>f.host,getState:()=>f.state,eventSource:f.bus,eventTypes:types});
-    assert.equal((await fresh.cleanRecent()).status,'unchanged');assert.equal(m.mes,'aa');assert.equal(getHistory(m).before,'a');fresh.dispose();
+test('a long manual batch can be repeated after reload without compounding replacements', async () => {
+    const f = fixture('a', 'aa');
+    f.state.manualCleanLimit = 12;
+    f.host.chat = Array.from({ length: 12 }, () => f.message('a'));
+    await f.cleaner.cleanRecent();
+    f.cleaner.dispose();
+    f.host.chat = structuredClone(f.host.chat);
+    const fresh = createMessageCleaner({ getContext: () => f.host, getState: () => f.state, eventSource: f.bus, eventTypes: types });
+    assert.equal((await fresh.cleanRecent()).status, 'unchanged');
+    assert.ok(f.host.chat.every(message => message.mes === 'aa' && message.swipes[0] === 'aa' && getHistory(message)?.before === 'a'));
+    assert.equal(f.saves, 1);
+    fresh.dispose();
 });
 test('renderer-owned appended content survives message update and is synchronized to Swipe',async()=>{
     const f=fixture('甲','乙'),m=f.message('甲');f.host.chat.push(m);f.bus.on(types.MESSAGE_UPDATED,()=>{m.mes+='\n<StatusPlaceHolderImpl/>'});

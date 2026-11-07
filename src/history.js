@@ -1,8 +1,9 @@
 import { protectedRanges } from './engine.js';
 
 export const HISTORY_KEY = 'veridis_lite';
+const COMPARISON_LIMIT = 10;
 export const assistant = message => !!message && message.is_user !== true && message.is_system !== true && typeof message.mes === 'string';
-export function recentAssistantIndices(chat, limit = 10) {
+export function recentAssistantIndices(chat, limit = COMPARISON_LIMIT) {
     const result = [];
     for (let i = (chat?.length || 0) - 1; i >= 0 && result.length < limit; i--) if (assistant(chat[i])) result.push(i);
     return result.reverse();
@@ -39,8 +40,8 @@ export function writeHistory(message, branch, before, after, changes) {
     }
     return dirty;
 }
-export function pruneHistory(chat) {
-    const retained = new Set(recentAssistantIndices(chat));
+export function pruneHistory(chat, manualLimit = 1) {
+    const retained = new Set(recentAssistantIndices(chat, Math.max(COMPARISON_LIMIT, manualLimit)));
     let dirty = false;
     for (const [index, message] of chat.entries()) {
         if (!message || typeof message !== 'object') continue;
