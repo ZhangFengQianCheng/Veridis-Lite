@@ -17,7 +17,7 @@ html,body{margin:0;height:100%;font-family:'Segoe UI','Microsoft YaHei',sans-ser
 :root{--SmartThemeBlurTintColor:#25271f;--SmartThemeBodyColor:#e7e7de;--SmartThemeBorderColor:#3a3d32;--SmartThemeQuoteColor:#d6bb6d}
 body{display:block;overflow:auto;min-height:100vh}#extensionsMenu{position:absolute;top:15px;left:20px}
 #host-panel{width:min(1024px,calc(100vw - 32px));margin:65px auto 25px;padding:12px;background:var(--SmartThemeBlurTintColor);border:1px solid var(--SmartThemeBorderColor);border-radius:10px}#host-panel>h3{margin:0 0 12px;font-size:20px}.vrl-host-columns{display:flex;gap:10px}.vrl-host-columns>div{flex:1;min-width:0;width:50%}
-.menu_button{width:min-content}.inline-drawer-header{display:flex;align-items:center;justify-content:space-between;border:1px solid var(--SmartThemeBorderColor);border-radius:9px;padding:4px 7px;margin-bottom:5px;font-size:16px;background:linear-gradient(348deg,#ffffff10,#0009)}
+.menu_button{width:min-content}.inline-drawer-header{display:flex;align-items:center;justify-content:space-between;border:1px solid var(--SmartThemeBorderColor);border-radius:9px;padding:4px 7px;margin-bottom:5px;font-size:16px;background:linear-gradient(348deg,#ffffff10,#0009)}.mes_buttons{display:flex;justify-content:flex-end}.mes_button{width:44px;height:44px;line-height:44px;text-align:center}
 @media(max-width:600px){#host-panel{margin-top:60px}.vrl-host-columns{flex-direction:column}.vrl-host-columns>div{width:100%}}
 </style></head><body><div id="extensionsMenu"></div><section id="host-panel"><h3>扩展程序</h3><div class="vrl-host-columns"><div id="extensions_settings" class="flex1 wide50p">${['下载扩展程序和资源','角色表情','图像生成','图像提示词模板','TTS','提示词模板','故事神谕','酒馆助手'].map(nativeRow).join('')}</div><div id="extensions_settings2" class="flex1 wide50p">${['快速回复','QR助手','聊天翻译','图片描述','总结','正则','向量存储','鸡尾酒'].map(nativeRow).join('')}</div></div></section><div id="chat" style="position:relative;width:700px;max-width:95vw;height:auto;margin:20px auto"></div><script type="module" src="${prefix}index.js"></script></body></html>`;
 const host=`
@@ -25,7 +25,7 @@ class Events{constructor(){this.listeners=new Map()}on(k,f){if(!this.listeners.h
 export const extension_settings=JSON.parse(sessionStorage.getItem('settings')||'{"ultimate_purifier_ai_rewrite":{"untouched":true}}');
 export const eventSource=new Events();export const event_types=Object.fromEntries(['APP_READY','GENERATION_STARTED','GENERATION_ENDED','GENERATION_STOPPED','MESSAGE_RECEIVED','CHARACTER_MESSAGE_RENDERED','MESSAGE_EDITED','MESSAGE_UPDATED','MESSAGE_SWIPED','CHAT_CHANGED'].map(k=>[k,k]));
 export const saveSettingsDebounced=()=>sessionStorage.setItem('settings',JSON.stringify(extension_settings));
-const ctx={chat:JSON.parse(sessionStorage.getItem('chat')||'[]'),chatId:'fixture',updateMessageBlock(index,message){window.__updates++;let node=document.querySelector('#chat .mes[mesid="'+index+'"]');if(!node){node=document.createElement('div');node.className='mes';node.setAttribute('mesid',index);node.innerHTML='<div class="mes_buttons"><div class="mes_edit">✎</div></div><div class="mes_text"></div>';document.querySelector('#chat').append(node)}node.querySelector('.mes_text').textContent=message.mes},async saveChat(){window.__saves++;sessionStorage.setItem('chat',JSON.stringify(ctx.chat))}};
+const ctx={chat:JSON.parse(sessionStorage.getItem('chat')||'[]'),chatId:'fixture',updateMessageBlock(index,message){window.__updates++;let node=document.querySelector('#chat .mes[mesid="'+index+'"]');if(!node){node=document.createElement('div');node.className='mes';node.setAttribute('mesid',index);node.innerHTML='<div class="mes_buttons"><div class="mes_button extraMesButtonsHint">⋯</div><div class="mes_button mes_edit">✎</div></div><div class="mes_text"></div>';document.querySelector('#chat').append(node)}node.querySelector('.mes_text').textContent=message.mes},async saveChat(){window.__saves++;sessionStorage.setItem('chat',JSON.stringify(ctx.chat))}};
 export const getContext=()=>ctx;window.__saves=0;window.__updates=0;window.__notices=[];
 window.toastr=Object.fromEntries(['info','warning','error','success'].map(k=>[k,m=>window.__notices.push({kind:k,message:m})]));
 window.__beautify=[];eventSource.on(event_types.MESSAGE_UPDATED,index=>{window.__beautify.push(index);const node=document.querySelector('#chat .mes[mesid="'+index+'"] .mes_text');if(node){const wrapper=document.createElement('div');wrapper.className='fixture-beautified';wrapper.textContent=ctx.chat[index].mes;node.replaceChildren(wrapper)}});
@@ -130,6 +130,16 @@ try{
     await page.screenshot({path:path.join(output,'comparison-preview.png')});await page.locator('.vrl-diff-dialog [data-close]').click();
     await page.waitForFunction(()=>document.querySelector('#chat .vrl-diff-message'));
     check('a message gets a comparison entry only after actual purification',await page.locator('#chat .vrl-diff-message').count()===1);
+    const iconAlignment=await page.locator('#chat .vrl-diff-message').evaluate(button=>{
+        const icon=button.querySelector('svg').getBoundingClientRect();
+        const area=button.getBoundingClientRect();
+        const edit=button.parentElement.querySelector('.mes_edit').getBoundingClientRect();
+        return {x:(icon.left+icon.right-area.left-area.right)/2,
+            y:(icon.top+icon.bottom-edit.top-edit.bottom)/2,
+            beforeEdit:button.nextElementSibling?.matches('.mes_edit')};
+    });
+    check('comparison icon is centered beside the native edit button '+JSON.stringify(iconAlignment),
+        Math.abs(iconAlignment.x)<1&&Math.abs(iconAlignment.y)<1&&iconAlignment.beforeEdit);
 
     await click('add-group');await nameDialog().locator('input').fill('标点与口癖');await nameDialog().getByRole('button',{name:'保存',exact:true}).click();
     let card=page.locator('.vrl-card').filter({has:page.getByRole('button',{name:'标点与口癖',exact:true})});

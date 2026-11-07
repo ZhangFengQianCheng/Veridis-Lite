@@ -1,6 +1,6 @@
 # Veridis Lite · 词汇净化精简版
 
-当前版本：1.2.2（界面观感优化：滑动开关、预设工具栏、规则行悬停与徽章、对比窗口图例；功能与 1.2.1 相同）。
+当前版本为 1.2.3，修正了聊天消息栏里的净化对比按钮对齐。
 
 基于 [Veridis Rewrite](https://github.com/The-Veridis-Lion/Veridis-Rewrite) 制作的非商业精简改版。原作者：[The-Veridis-Lion / Veridis](https://github.com/The-Veridis-Lion)；原项目 [Discord](https://discord.com/channels/1134557553011998840/1488671923776000020)。
 
@@ -12,7 +12,7 @@
 
 安装最新版时，在 SillyTavern 的扩展菜单中选择「安装扩展」，粘贴本仓库地址。
 
-也可以从仓库的 Releases 页面下载指定版本的 `Veridis-Lite-1.2.2.zip`，按下面的步骤手动安装。
+也可以从仓库的 Releases 页面下载指定版本的 `Veridis-Lite-1.2.3.zip`，按下面的步骤手动安装。
 
 1. 解压安装包，将 `Veridis-Lite` 文件夹放进酒馆现有的第三方扩展目录，与原版扩展文件夹同级。常见全局目录为 `public/scripts/extensions/third-party/`。应直接得到 `Veridis-Lite/manifest.json`，不要多套一层同名目录。
 2. 在酒馆扩展管理中关闭原版 Veridis Rewrite，再刷新页面并启用精简版，避免两套替换同时执行。

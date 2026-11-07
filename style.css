@@ -246,7 +246,12 @@
     .vrl-group-edit-row > input { flex-basis: calc(100% - 40px); }
     .vrl-group-edit-row .vrl-count { margin-left: 24px; margin-right: auto; }
 }
-.vrl-diff-message svg { display: block; width: 18px; height: 18px; }
+.mes_buttons > .vrl-diff-message {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+}
+.vrl-diff-message > svg { display: block; width: 18px; height: 18px; }
 .vrl-diff-dialog { width: 900px; min-height: 220px; max-height: min(720px, calc(100dvh - 40px)); }
 .vrl-diff-toolbar { padding: 12px 18px; display: flex; align-items: center; gap: 14px; border-bottom: 1px solid var(--vrl-border); flex-shrink: 0; background: var(--vrl-raise); }
 .vrl-diff-toolbar select { flex: 1; min-width: 0; max-width: 310px; }

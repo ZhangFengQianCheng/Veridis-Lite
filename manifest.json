@@ -4,6 +4,6 @@
   "js": "index.js",
   "css": "style.css",
   "author": "Veridis（原作者）；Veridis Lite 非商业精简改版",
-  "version": "1.2.2",
+  "version": "1.2.3",
   "description": "预设、规则分组与本地文本替换。支持普通文本、简易组合、正则表达式。"
 }
