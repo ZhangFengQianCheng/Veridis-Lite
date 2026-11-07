@@ -2,6 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createMessageCleaner } from '../src/runtime.js';
 import { activePreset, createState } from '../src/model.js';
+import { getHistory } from '../src/history.js';
 
 class Events {
     events = new Map();
@@ -9,7 +10,7 @@ class Events {
     removeListener(key, fn) { this.events.set(key,this.events.get(key).filter(x=>x!==fn)); }
     async emit(key,...args) { for(const fn of [...(this.events.get(key)||[])]) await fn(...args); }
 }
-const types=Object.fromEntries(['GENERATION_STARTED','GENERATION_ENDED','GENERATION_STOPPED','MESSAGE_RECEIVED','MESSAGE_SWIPED','MESSAGE_EDITED','CHARACTER_MESSAGE_RENDERED','CHAT_CHANGED'].map(k=>[k,k]));
+const types=Object.fromEntries(['GENERATION_STARTED','GENERATION_ENDED','GENERATION_STOPPED','MESSAGE_RECEIVED','MESSAGE_SWIPED','MESSAGE_EDITED','MESSAGE_UPDATED','CHARACTER_MESSAGE_RENDERED','CHAT_CHANGED'].map(k=>[k,k]));
 function fixture(target='极其', replacement='') {
     const state = createState();
     const preset = { id: 'fixture-preset', name: '测试预设', rules: [
@@ -80,10 +81,10 @@ test('manual editing cancels a queued cleanup',async()=>{
 test('master switch takes effect before a queued commit',async()=>{
     const f=fixture();f.host.chat.push(f.message('极其'));await f.receipt(0);f.state.enabled=false;await f.tick();assert.equal(f.saves,0);f.cleaner.dispose();
 });
-test('custom and Swipe metadata are preserved without storing provenance snapshots',async()=>{
+test('custom and Swipe metadata are preserved alongside the bounded comparison record',async()=>{
     const f=fixture(),m=f.message('极其');m.extra.display_text='old';m.swipe_info[0].extra.display_text='old';m.custom={keep:true};f.host.chat.push(m);
-    await f.receipt(0);await f.tick();assert.deepEqual(m.extra,{keep:true});assert.deepEqual(m.swipe_info[0].extra,{keep:true});assert.deepEqual(m.custom,{keep:true});
-    assert.ok(!Object.keys(m).some(k=>k.startsWith('__blai')));f.cleaner.dispose();
+    await f.receipt(0);await f.tick();assert.equal(m.extra.keep,true);assert.equal(m.swipe_info[0].extra.keep,true);assert.deepEqual(m.custom,{keep:true});
+    assert.equal(getHistory(m).before,'极其');assert.equal(getHistory(m).after,'');assert.deepEqual(m.extra.veridis_lite,m.swipe_info[0].extra.veridis_lite);assert.notEqual(m.extra.veridis_lite,m.swipe_info[0].extra.veridis_lite);f.cleaner.dispose();
 });
 test('unchanged text does not save or refresh the host',async()=>{
     const f=fixture();f.host.chat.push(f.message('正常正文'));await f.receipt(0);await f.tick();assert.equal(f.saves,0);assert.equal(f.updates,0);f.cleaner.dispose();
@@ -136,4 +137,34 @@ test('a failed manual save can be retried without repeating the replacement',asy
     const f=fixture('a','aa'),m=f.message('a');f.host.chat.push(m);f.host.saveChat=async()=>{throw Error('offline')};
     assert.equal((await f.cleaner.refreshLatest()).status,'save-failed');assert.equal(m.mes,'aa');let saved=0;f.host.saveChat=async()=>{saved++};
     assert.equal((await f.cleaner.refreshLatest()).status,'saved');assert.equal(m.mes,'aa');assert.equal(saved,1);f.cleaner.dispose();
+});
+test('clean ten selects the latest ten assistants and saves the whole batch once',async()=>{
+    const f=fixture('甲','乙');
+    for(let i=0;i<12;i++)f.host.chat.push({is_user:true,mes:'用户甲'},f.message('回复甲'+i));
+    const result=await f.cleaner.cleanRecent();assert.equal(result.changed,10);assert.equal(result.changes,10);assert.equal(f.saves,1);
+    assert.equal(f.host.chat[1].mes,'回复甲0');assert.equal(f.host.chat[3].mes,'回复甲1');
+    for(let i=2;i<12;i++)assert.equal(f.host.chat[i*2+1].mes,'回复乙'+i);
+    assert.ok(f.host.chat.filter(m=>m.is_user).every(m=>m.mes==='用户甲'));f.cleaner.dispose();
+});
+test('beautification is notified after native formatting and before saving',async()=>{
+    const f=fixture('甲','乙'),events=[];f.host.chat.push(f.message('甲'));
+    f.host.updateMessageBlock=()=>events.push('native-format');f.bus.on(types.MESSAGE_UPDATED,id=>{assert.equal(id,0);events.push('beautify')});f.host.saveChat=async()=>events.push('save');
+    await f.cleaner.cleanRecent();assert.deepEqual(events,['native-format','beautify','save']);f.cleaner.dispose();
+});
+test('manual cleanup re-notifies renderers even when there is no textual change',async()=>{
+    const f=fixture();f.host.chat.push(f.message('普通正文'));let renders=0;f.bus.on(types.MESSAGE_UPDATED,()=>{renders++});
+    await f.cleaner.cleanRecent();assert.equal(renders,1);assert.equal(f.saves,0);f.cleaner.dispose();
+});
+test('comparison records persist across a fresh cleaner instance and retain the current Swipe',async()=>{
+    const f=fixture('a','aa'),m=f.message('a');f.host.chat.push(m);await f.cleaner.cleanRecent();f.cleaner.dispose();
+    const fresh=createMessageCleaner({getContext:()=>f.host,getState:()=>f.state,eventSource:f.bus,eventTypes:types});
+    assert.equal((await fresh.cleanRecent()).status,'unchanged');assert.equal(m.mes,'aa');assert.equal(getHistory(m).before,'a');fresh.dispose();
+});
+test('renderer-owned appended content survives message update and is synchronized to Swipe',async()=>{
+    const f=fixture('甲','乙'),m=f.message('甲');f.host.chat.push(m);f.bus.on(types.MESSAGE_UPDATED,()=>{m.mes+='\n<StatusPlaceHolderImpl/>'});
+    await f.cleaner.cleanRecent();assert.equal(m.mes,'乙\n<StatusPlaceHolderImpl/>');assert.equal(m.swipes[0],m.mes);assert.equal(getHistory(m).after,'乙');f.cleaner.dispose();
+});
+test('a chat switch in a rendering callback stops the batch and never saves the other chat',async()=>{
+    const f=fixture('甲','乙');f.host.chat.push(f.message('甲'),f.message('甲'));f.bus.on(types.MESSAGE_UPDATED,()=>{f.host.chat=[];f.host.chatId='other'});
+    const result=await f.cleaner.cleanRecent();assert.equal(result.status,'stale');assert.equal(f.saves,0);f.cleaner.dispose();
 });

@@ -35,7 +35,7 @@ function dialog(className, content) {
     return node;
 }
 
-export function createUI({ state, save, notify, refreshLatest }) {
+export function createUI({ state, save, notify, cleanRecent, showComparison }) {
     let main, search = '', expanded = new Set();
     const preset = () => activePreset(state);
     const groupById = groupId => preset()?.rules.find(g => g.id === groupId);
@@ -65,6 +65,7 @@ export function createUI({ state, save, notify, refreshLatest }) {
                 <div class="vrl-rule-source"><span class="vrl-mode">${labels[rule.mode]}</span><div>${html(rule.targets.join(' / '))}</div>${rule.remark ? `<small>${html(rule.remark)}</small>` : ''}${invalid.has(rule.id) ? `<small class="vrl-error">${html(invalid.get(rule.id))}</small>` : ''}</div>
                 <span class="vrl-arrow" aria-hidden="true">→</span>
                 <div class="vrl-rule-destination"><span class="vrl-muted">${rule.replacements.length > 1 ? `随机替换 · ${rule.replacements.length} 个候选` : '替换为'}</span><div class="${rule.replacements.length ? '' : 'vrl-muted'}">${rule.replacements.length ? html(rule.replacements.join(' / ')) : '删除'}</div></div>
+                ${button('delete-inline-rule', icon('trash-can'), `class="vrl-icon vrl-delete-rule" data-group-id="${html(group.id)}" data-id="${html(rule.id)}" aria-label="删除规则 ${html(rule.targets[0])}"`)}
                 ${button('edit-rule', icon('pen'), `class="vrl-icon" data-group-id="${html(group.id)}" data-id="${html(rule.id)}" aria-label="编辑规则 ${html(rule.targets[0])}"`)}
             </div>`).join('') || '<div class="vrl-card-empty">这个分组还没有规则，点击“添加规则”开始。</div>'}</div>
             ${!query && rows.length > 3 ? button('expand', expanded.has(group.id) ? '收起规则' : `展开其余 ${rows.length - 3} 条规则`, `class="vrl-expand" data-id="${html(group.id)}"`) : ''}
@@ -213,14 +214,19 @@ export function createUI({ state, save, notify, refreshLatest }) {
         if (action === 'refresh-body') {
             if (target.disabled) return;
             const previous = target.innerHTML;
-            target.disabled = true; target.textContent = '正在刷新…';
+            target.disabled = true; target.textContent = '正在净化…';
             const status = main.querySelector('#vrl-refresh-status');
             status.textContent = '正在应用当前规则'; status.classList.remove('vrl-error');
-            Promise.resolve().then(() => refreshLatest()).then(result => {
+            Promise.resolve().then(() => cleanRecent({ onProgress: ({ current, total }) => { status.textContent = `正在净化 ${current}/${total} 楼`; } })).then(result => {
                 status.textContent = result.message;
                 status.classList.toggle('vrl-error', ['error', 'save-failed', 'display-failed'].includes(result.status));
-            }).catch(error => { status.textContent = `刷新失败：${error.message}`; status.classList.add('vrl-error'); })
+            }).catch(error => { status.textContent = `净化失败：${error.message}`; status.classList.add('vrl-error'); })
                 .finally(() => { target.disabled = false; target.innerHTML = previous; });
+        }
+        if (action === 'show-comparison') showComparison();
+        if (action === 'delete-inline-rule') {
+            const group = groupById(target.dataset.groupId), rule = group?.subRules.find(item => item.id === target.dataset.id);
+            if (rule && confirm(`删除这条规则？\n${rule.targets.join(' / ').slice(0, 100)}`)) { group.subRules = group.subRules.filter(item => item.id !== rule.id); persist(); }
         }
         if (action === 'new-preset') askName('新建预设', uniqueName(state, '新预设'), name => {
             if (state.presets.some(p => p.name === name)) { notify('已有同名预设，请换一个名称。', 'warning'); return false; }
@@ -269,7 +275,7 @@ export function createUI({ state, save, notify, refreshLatest }) {
                     ${button('new-preset', `${icon('plus')} 新建`)}${button('rename-preset', `${icon('pen-to-square')} 重命名`)}${button('import', `${icon('file-import')} 导入`)}${button('export', `${icon('file-export')} 导出`)}${button('delete-preset', `${icon('trash-can')} 删除`, 'class="vrl-danger"')}
                 </div></section><section class="vrl-rules-section"><div class="vrl-section-title"><h3>规则集</h3><div class="vrl-rule-actions">${button('add-group', `${icon('plus')} 添加`, 'class="vrl-primary"')}${button('search', `${icon('magnifying-glass')} 搜索`)}${button('edit-groups', `${icon('pen-to-square')} 编辑分组`)}${button('reverse', `${icon('arrow-down-up-across-line')} 反序排列`)}</div></div>
                     <div id="vrl-search-wrap" class="vrl-search" hidden><input id="vrl-search" type="search" placeholder="搜索匹配词、替换词、备注或分组" aria-label="搜索规则">${button('clear-search', icon('xmark'), 'class="vrl-icon" aria-label="清空搜索"')}</div>
-                    <div id="vrl-groups"></div></section></div><footer class="vrl-main-footer"><div class="vrl-refresh-control">${button('refresh-body', `${icon('rotate-right')} 立即刷新正文`, 'class="vrl-primary" title="用当前规则重新处理最新一条助手回复"')}<span id="vrl-refresh-status" role="status">作用于最新一条助手回复</span></div><div class="vrl-footer-meta"><span id="vrl-saved">自动保存</span><a href="https://github.com/The-Veridis-Lion/Veridis-Rewrite" target="_blank" rel="noopener noreferrer">基于 Veridis Rewrite</a></div></footer><input type="file" id="vrl-file" accept="application/json,.json" hidden>`);
+                    <div id="vrl-groups"></div></section></div><footer class="vrl-main-footer"><div class="vrl-refresh-control"><div class="vrl-clean-actions">${button('refresh-body', `${icon('rotate-right')} 净化十楼`, 'class="vrl-primary" title="用当前规则净化最近十条助手回复，各自只处理当前 Swipe"')}${button('show-comparison', '查看改动', 'title="查看最近十楼的净化前后对比"')}</div><span id="vrl-refresh-status" role="status">最近十条助手回复 · 当前 Swipe</span></div><div class="vrl-footer-meta"><span id="vrl-saved">自动保存</span><a href="https://github.com/The-Veridis-Lion/Veridis-Rewrite" target="_blank" rel="noopener noreferrer">基于 Veridis Rewrite</a></div></footer><input type="file" id="vrl-file" accept="application/json,.json" hidden>`);
             main.addEventListener('click', event => { const target = event.target.closest('button[data-action]'); if (target && !target.disabled) handleAction(target.dataset.action, target); });
             main.addEventListener('change', event => {
                 const input = event.target;

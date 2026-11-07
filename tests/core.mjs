@@ -2,6 +2,9 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { applyRules, compileRules, compileTarget, validateRule } from '../src/engine.js';
 import { activePreset, createState, exportPreset, importPreset, loadState, uniqueName } from '../src/model.js';
+import { getTextDiffOperations } from '../src/diff.js';
+import { getHistory, pruneHistory, writeHistory, branchOf } from '../src/history.js';
+import { renderComparison } from '../src/diffView.js';
 
 const rule = (targets, replacements = [], mode = 'text', enabled = true) => ({targets, replacements, mode, enabled});
 const group = (...subRules) => ({name: '合成示例', enabled: true, subRules});
@@ -88,4 +91,26 @@ test('own settings are independent and preset names stay unique', () => {
     assert.equal(uniqueName(state, '测试预设'), '测试预设 (2)');
     const restored=loadState(state);assert.deepEqual(restored,state);assert.notEqual(restored,state);
     assert.throws(()=>loadState({presets:[{}]}));
+});
+test('exact diff reconstructs both sides including repeated text, emoji and whitespace',()=>{
+    for(const [before,after] of [['泥星','污泥'],['甲甲乙甲','甲乙丙甲'],['你好😀\n甲','你好😀\n乙'],['a\n\nb','a\nb'],['','新正文'],['旧正文',''],['<script>甲</script>','<script>乙</script>']]){
+        const ops=getTextDiffOperations(before,after);
+        assert.equal(ops.filter(op=>op.type!=='insert').map(op=>op.text).join(''),before);
+        assert.equal(ops.filter(op=>op.type!=='delete').map(op=>op.text).join(''),after);
+    }
+});
+test('comparison HTML escapes source markup and shows actual removals and insertions',()=>{
+    const result=renderComparison(getTextDiffOperations('<img onerror="bad">甲','<img onerror="bad">乙'));
+    assert.ok(!result.includes('<img'));assert.ok(result.includes('&lt;img'));assert.ok(result.includes('<del>甲</del>'));assert.ok(result.includes('<ins>乙</ins>'));
+});
+test('history eviction removes only this extension records beyond the last ten assistants',()=>{
+    const chat=Array.from({length:12},(_,i)=>({is_user:false,mes:'甲'+i,extra:{other:'keep'},swipe_id:0,swipes:['甲'+i],swipe_info:[{extra:{other:'keep'}}]}));
+    for(const message of chat)writeHistory(message,branchOf(message),'原文',message.mes,1);
+    assert.equal(pruneHistory(chat),true);assert.equal(getHistory(chat[0]),null);assert.equal(getHistory(chat[1]),null);assert.ok(getHistory(chat[2]));
+    assert.equal(chat[0].extra.other,'keep');assert.equal(chat[0].swipe_info[0].extra.other,'keep');
+});
+test('a saved comparison follows its Swipe when an earlier candidate is deleted',()=>{
+    const message={mes:'乙',swipe_id:1,swipes:['其他','乙'],extra:{},swipe_info:[{extra:{}},{extra:{}}]};
+    writeHistory(message,branchOf(message),'甲','乙',1);message.swipes.splice(0,1);message.swipe_info.splice(0,1);message.swipe_id=0;
+    assert.equal(getHistory(message).before,'甲');assert.equal(getHistory(message).after,'乙');
 });

@@ -19,16 +19,17 @@ body{display:block;overflow:auto;min-height:100vh}#extensionsMenu{position:absol
 #host-panel{width:min(1024px,calc(100vw - 32px));margin:65px auto 25px;padding:12px;background:var(--SmartThemeBlurTintColor);border:1px solid var(--SmartThemeBorderColor);border-radius:10px}#host-panel>h3{margin:0 0 12px;font-size:20px}.vrl-host-columns{display:flex;gap:10px}.vrl-host-columns>div{flex:1;min-width:0;width:50%}
 .menu_button{width:min-content}.inline-drawer-header{display:flex;align-items:center;justify-content:space-between;border:1px solid var(--SmartThemeBorderColor);border-radius:9px;padding:4px 7px;margin-bottom:5px;font-size:16px;background:linear-gradient(348deg,#ffffff10,#0009)}
 @media(max-width:600px){#host-panel{margin-top:60px}.vrl-host-columns{flex-direction:column}.vrl-host-columns>div{width:100%}}
-</style></head><body><div id="extensionsMenu"></div><section id="host-panel"><h3>扩展程序</h3><div class="vrl-host-columns"><div id="extensions_settings" class="flex1 wide50p">${['下载扩展程序和资源','角色表情','图像生成','图像提示词模板','TTS','提示词模板','故事神谕','酒馆助手'].map(nativeRow).join('')}</div><div id="extensions_settings2" class="flex1 wide50p">${['快速回复','QR助手','聊天翻译','图片描述','总结','正则','向量存储','鸡尾酒'].map(nativeRow).join('')}</div></div></section><script type="module" src="${prefix}index.js"></script></body></html>`;
+</style></head><body><div id="extensionsMenu"></div><section id="host-panel"><h3>扩展程序</h3><div class="vrl-host-columns"><div id="extensions_settings" class="flex1 wide50p">${['下载扩展程序和资源','角色表情','图像生成','图像提示词模板','TTS','提示词模板','故事神谕','酒馆助手'].map(nativeRow).join('')}</div><div id="extensions_settings2" class="flex1 wide50p">${['快速回复','QR助手','聊天翻译','图片描述','总结','正则','向量存储','鸡尾酒'].map(nativeRow).join('')}</div></div></section><div id="chat" style="position:relative;width:700px;max-width:95vw;height:auto;margin:20px auto"></div><script type="module" src="${prefix}index.js"></script></body></html>`;
 const host=`
 class Events{constructor(){this.listeners=new Map()}on(k,f){if(!this.listeners.has(k))this.listeners.set(k,[]);this.listeners.get(k).push(f)}removeListener(k,f){this.listeners.set(k,this.listeners.get(k).filter(x=>x!==f))}async emit(k,...args){for(const f of [...(this.listeners.get(k)||[])])await f(...args)}}
 export const extension_settings=JSON.parse(sessionStorage.getItem('settings')||'{"ultimate_purifier_ai_rewrite":{"untouched":true}}');
-export const eventSource=new Events();export const event_types=Object.fromEntries(['APP_READY','GENERATION_STARTED','GENERATION_ENDED','GENERATION_STOPPED','MESSAGE_RECEIVED','CHARACTER_MESSAGE_RENDERED','MESSAGE_EDITED','MESSAGE_SWIPED','CHAT_CHANGED'].map(k=>[k,k]));
+export const eventSource=new Events();export const event_types=Object.fromEntries(['APP_READY','GENERATION_STARTED','GENERATION_ENDED','GENERATION_STOPPED','MESSAGE_RECEIVED','CHARACTER_MESSAGE_RENDERED','MESSAGE_EDITED','MESSAGE_UPDATED','MESSAGE_SWIPED','CHAT_CHANGED'].map(k=>[k,k]));
 export const saveSettingsDebounced=()=>sessionStorage.setItem('settings',JSON.stringify(extension_settings));
-const ctx={chat:[],chatId:'fixture',updateMessageBlock(){window.__updates++},async saveChat(){window.__saves++}};
+const ctx={chat:JSON.parse(sessionStorage.getItem('chat')||'[]'),chatId:'fixture',updateMessageBlock(index,message){window.__updates++;let node=document.querySelector('#chat .mes[mesid="'+index+'"]');if(!node){node=document.createElement('div');node.className='mes';node.setAttribute('mesid',index);node.innerHTML='<div class="mes_buttons"><div class="mes_edit">✎</div></div><div class="mes_text"></div>';document.querySelector('#chat').append(node)}node.querySelector('.mes_text').textContent=message.mes},async saveChat(){window.__saves++;sessionStorage.setItem('chat',JSON.stringify(ctx.chat))}};
 export const getContext=()=>ctx;window.__saves=0;window.__updates=0;window.__notices=[];
 window.toastr=Object.fromEntries(['info','warning','error','success'].map(k=>[k,m=>window.__notices.push({kind:k,message:m})]));
-window.__host={ctx,eventSource,event_types,extension_settings};
+window.__beautify=[];eventSource.on(event_types.MESSAGE_UPDATED,index=>{window.__beautify.push(index);const node=document.querySelector('#chat .mes[mesid="'+index+'"] .mes_text');if(node){const wrapper=document.createElement('div');wrapper.className='fixture-beautified';wrapper.textContent=ctx.chat[index].mes;node.replaceChildren(wrapper)}});
+window.__host={ctx,eventSource,event_types,extension_settings};ctx.chat.forEach((message,index)=>ctx.updateMessageBlock(index,message));
 `;
 const browser=await chromium.launch({headless:true,executablePath:process.env.VRL_TEST_CHROME||undefined});
 const page=await browser.newPage({viewport:{width:1360,height:960},deviceScaleFactor:1});
@@ -111,12 +112,20 @@ try{
     });
     await page.waitForFunction(()=>window.__host.ctx.chat[0].mes==='刚才，一小时前出现了魔力。');
     check('actual entry responds to host completion events and synchronizes Swipe',await page.evaluate(()=>window.__saves===1&&window.__host.ctx.chat[0].swipes[0]===window.__host.ctx.chat[0].mes));
+    check('beautification is automatically restored after writing',await page.locator('#chat .mes[mesid="0"] .fixture-beautified').count()===1);
     await page.evaluate(()=>{const s=window.__host.extension_settings.veridis_lite;const p=s.presets.find(p=>p.id===s.activePresetId);p.rules[0].subRules.push({id:'manual-rule',mode:'text',enabled:true,targets:['出现了'],replacements:['产生了'],remark:''})});
     await click('refresh-body');await page.waitForFunction(()=>window.__host.ctx.chat[0].mes==='刚才，一小时前产生了魔力。');
     check('manual refresh applies a newly added rule and synchronizes the current Swipe',await page.evaluate(()=>window.__host.ctx.chat[0].swipes[0]===window.__host.ctx.chat[0].mes));
-    check('manual refresh displays a concrete completion status',(await page.locator('#vrl-refresh-status').innerText()).includes('已刷新'));
+    check('manual cleanup displays a concrete completion status',(await page.locator('#vrl-refresh-status').innerText()).includes('已净化'));
     const savedBeforeRepeat=await page.evaluate(()=>window.__saves);await click('refresh-body');await page.waitForFunction(()=>document.querySelector('#vrl-refresh-status').textContent.includes('无需修改'));
     check('repeated manual refresh has no extra write',await page.evaluate(()=>window.__saves)===savedBeforeRepeat);
+    await click('show-comparison');await page.locator('.vrl-diff-body del').first().waitFor();
+    check('comparison marks deleted and inserted text',await page.locator('.vrl-diff-body ins').count()>0&&await page.locator('.vrl-diff-body del').count()>0);
+    const savesBeforeView=await page.evaluate(()=>window.__saves);await page.locator('.vrl-diff-dialog [data-mode]').click();
+    check('full text comparison opens without editing the chat',await page.locator('.vrl-diff-prose').count()===1&&await page.evaluate(()=>window.__saves)===savesBeforeView);
+    await page.screenshot({path:path.join(output,'comparison-preview.png')});await page.locator('.vrl-diff-dialog [data-close]').click();
+    await page.waitForFunction(()=>document.querySelector('#chat .vrl-diff-message'));
+    check('a message gets a comparison entry only after actual purification',await page.locator('#chat .vrl-diff-message').count()===1);
 
     await click('add-group');await nameDialog().locator('input').fill('标点与口癖');await nameDialog().getByRole('button',{name:'保存',exact:true}).click();
     let card=page.locator('.vrl-card').filter({has:page.getByRole('button',{name:'标点与口癖',exact:true})});
@@ -132,6 +141,11 @@ try{
     await card.locator('[data-action="add-rule"]').click();await ruleDialog().locator('[name="mode"]').selectOption('simple');
     await ruleDialog().locator('[name="targets"]').fill('{非常,十分}*认真');await ruleDialog().locator('[name="replacements"]').fill('认真');await ruleDialog().getByRole('button',{name:'保存规则',exact:true}).click();
     check('all three rule modes are editable',(await settings()).presets.at(-1).rules.at(-1).subRules.map(r=>r.mode).join(',')==='text,regex,simple');
+    const actionPlacement=await card.locator('.vrl-rule-row').first().evaluate(row=>{const d=row.querySelector('[data-action="delete-inline-rule"]').getBoundingClientRect(),e=row.querySelector('[data-action="edit-rule"]').getBoundingClientRect(),b=row.getBoundingClientRect();return{deleteRight:d.right,editLeft:e.left,editRight:e.right,rowRight:b.right}});
+    check('inline delete sits left of the pencil and the pencil keeps its original grid position '+JSON.stringify(actionPlacement),actionPlacement.deleteRight<=actionPlacement.editLeft&&Math.abs(actionPlacement.editLeft-(actionPlacement.rowRight-34))<2);
+    await card.locator('[data-action="add-rule"]').click();await ruleDialog().locator('[name="targets"]').fill('临时删除示例');await ruleDialog().getByRole('button',{name:'保存规则',exact:true}).click();
+    await card.getByRole('button',{name:'删除规则 临时删除示例',exact:true}).click();
+    check('inline rule deletion is saved immediately',(await settings()).presets.at(-1).rules.at(-1).subRules.length===3);
 
     await card.locator('.vrl-rule-row').first().locator('[data-action="edit-rule"]').click();await ruleDialog().locator('[name="remark"]').fill('删除多余程度副词');await ruleDialog().getByRole('button',{name:'保存规则',exact:true}).click();
     check('ordinary remarks persist',(await settings()).presets.at(-1).rules.at(-1).subRules[0].remark==='删除多余程度副词');
@@ -159,6 +173,10 @@ try{
     const chosen=(await settings()).presets.find(p=>p.name==='轻量词表');await page.locator('#vrl-preset').selectOption(chosen.id);
     await page.reload();await page.locator('#vrl-launcher').click();
     check('saved presets and rules survive a browser reload',(await settings()).activePresetId===chosen.id&&(await page.locator('.vrl-card').count())===2);
+    await click('show-comparison');await page.locator('.vrl-diff-body del').first().waitFor();check('comparison records survive a browser reload',await page.locator('.vrl-diff-body ins').count()>0);await page.locator('.vrl-diff-dialog [data-close]').click();
+    await page.evaluate(()=>{const {ctx}=window.__host;ctx.chat=Array.from({length:24},(_,i)=>i%2?{is_user:false,mes:'极其'+i,extra:{},swipe_id:0,swipes:['极其'+i],swipe_info:[{extra:{}}]}:{is_user:true,mes:'用户极其'+i})});
+    const beforeBatch=await page.evaluate(()=>window.__saves);await click('refresh-body');await page.waitForFunction(()=>document.querySelector('#vrl-refresh-status').textContent.includes('已净化 10 楼'));
+    check('button cleans exactly ten recent assistant replies in one saved batch',await page.evaluate(previous=>window.__saves===previous+1&&window.__host.ctx.chat[1].mes==='极其1'&&window.__host.ctx.chat[3].mes==='极其3'&&window.__host.ctx.chat.filter(m=>m.is_user).every(m=>m.mes.startsWith('用户极其'))&&window.__host.ctx.chat.slice(4).filter(m=>!m.is_user).every(m=>!m.mes.includes('极其')),beforeBatch));
 
     for(const [width,height] of [[1920,1080],[768,1024],[390,844],[360,780]]){
         await page.setViewportSize({width,height});

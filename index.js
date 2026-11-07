@@ -3,6 +3,7 @@ import { eventSource, event_types, saveSettingsDebounced } from '../../../../scr
 import { SETTINGS_KEY, loadState } from './src/model.js';
 import { createMessageCleaner } from './src/runtime.js';
 import { createUI } from './src/ui.js';
+import { createDiffViewer } from './src/diffView.js';
 
 const notify = (message, kind = 'info') => {
     const api = globalThis.toastr;
@@ -13,8 +14,9 @@ const notify = (message, kind = 'info') => {
 try {
     const state = loadState(extension_settings[SETTINGS_KEY]);
     const save = () => { extension_settings[SETTINGS_KEY] = state; saveSettingsDebounced(); };
-    const cleaner = createMessageCleaner({ getContext, getState: () => state, eventSource, eventTypes: event_types, notify });
-    const ui = createUI({ state, save, notify, refreshLatest: cleaner.refreshLatest });
+    const viewer = createDiffViewer({ getContext, eventSource, eventTypes: event_types });
+    const cleaner = createMessageCleaner({ getContext, getState: () => state, eventSource, eventTypes: event_types, notify, onChange: viewer.refresh });
+    const ui = createUI({ state, save, notify, cleanRecent: cleaner.cleanRecent, showComparison: viewer.open });
     const mount = () => {
         const menu = document.getElementById('extensionsMenu');
         if (menu && !document.getElementById('vrl-launcher')) {
