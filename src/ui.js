@@ -17,6 +17,7 @@ const icon = name => {
         'arrow-up': '<path d="M12 21V3m-7 7 7-7 7 7"/>',
         'arrow-down': '<path d="M12 3v18m-7-7 7 7 7-7"/>',
         'arrow-down-up-across-line': '<path d="M7 3v18m-4-4 4 4 4-4M17 21V3m-4 4 4-4 4 4"/>',
+        'rotate-right': '<path d="M20 7v5h-5M20 12a8 8 0 1 0-2 6M20 7l-3 3"/>',
     };
     return `<svg class="vrl-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${paths[name] || paths.plus}</svg>`;
 };
@@ -34,7 +35,7 @@ function dialog(className, content) {
     return node;
 }
 
-export function createUI({ state, save, notify }) {
+export function createUI({ state, save, notify, refreshLatest }) {
     let main, search = '', expanded = new Set();
     const preset = () => activePreset(state);
     const groupById = groupId => preset()?.rules.find(g => g.id === groupId);
@@ -92,7 +93,7 @@ export function createUI({ state, save, notify }) {
         const groups = current?.rules ?? [];
         const rules = groups.flatMap(g => g.subRules);
         main.querySelector('#vrl-stats').textContent = `${groups.length} 个规则组 · ${rules.length} 条规则`;
-        main.querySelector('#vrl-state-label').textContent = state.enabled ? '已启用' : '已暂停';
+        main.querySelector('#vrl-state-label').textContent = state.enabled ? '自动开启' : '自动暂停';
         main.querySelector('#vrl-saved').textContent = '自动保存';
         for (const action of ['rename-preset', 'export', 'delete-preset', 'add-group', 'search', 'edit-groups', 'reverse']) {
             main.querySelector('[data-action="' + action + '"]').disabled = !current;
@@ -209,6 +210,18 @@ export function createUI({ state, save, notify }) {
 
     function handleAction(action, target) {
         if (action === 'close') main.close();
+        if (action === 'refresh-body') {
+            if (target.disabled) return;
+            const previous = target.innerHTML;
+            target.disabled = true; target.textContent = '正在刷新…';
+            const status = main.querySelector('#vrl-refresh-status');
+            status.textContent = '正在应用当前规则'; status.classList.remove('vrl-error');
+            Promise.resolve().then(() => refreshLatest()).then(result => {
+                status.textContent = result.message;
+                status.classList.toggle('vrl-error', ['error', 'save-failed', 'display-failed'].includes(result.status));
+            }).catch(error => { status.textContent = `刷新失败：${error.message}`; status.classList.add('vrl-error'); })
+                .finally(() => { target.disabled = false; target.innerHTML = previous; });
+        }
         if (action === 'new-preset') askName('新建预设', uniqueName(state, '新预设'), name => {
             if (state.presets.some(p => p.name === name)) { notify('已有同名预设，请换一个名称。', 'warning'); return false; }
             const item = { id: id(), name, rules: [] }; state.presets.push(item); state.activePresetId = item.id; expanded.clear(); search = ''; main.querySelector('#vrl-search').value = ''; persist();
@@ -251,12 +264,12 @@ export function createUI({ state, save, notify }) {
 
     function open() {
         if (!main) {
-            main = dialog('vrl-main-dialog', `<header class="vrl-main-header"><div class="vrl-brand"><span class="vrl-brand-mark">V</span><div><h2>词汇净化 <span>Lite</span></h2><p>简单的规则，干净的回复。</p></div></div><div class="vrl-header-actions"><label class="vrl-switch"><input id="vrl-enabled" type="checkbox"><span id="vrl-state-label">已启用</span></label>${button('close', icon('xmark'), 'class="vrl-icon" aria-label="关闭词汇净化"')}</div></header>
+            main = dialog('vrl-main-dialog', `<header class="vrl-main-header"><div class="vrl-brand"><span class="vrl-brand-mark">${icon('filter')}</span><div><h2>词汇净化 <span>Lite</span></h2><p>管理预设和替换规则</p></div></div><div class="vrl-header-actions"><label class="vrl-switch" title="控制新回复的自动净化；手动刷新仍可使用"><input id="vrl-enabled" type="checkbox"><span id="vrl-state-label">自动开启</span></label>${button('close', icon('xmark'), 'class="vrl-icon" aria-label="关闭词汇净化"')}</div></header>
                 <div class="vrl-main-scroll"><section class="vrl-preset-section"><div class="vrl-preset-line"><label class="vrl-preset-label" for="vrl-preset">当前预设</label><select id="vrl-preset" aria-label="当前预设"></select><span id="vrl-stats" class="vrl-muted"></span></div><div class="vrl-preset-actions">
                     ${button('new-preset', `${icon('plus')} 新建`)}${button('rename-preset', `${icon('pen-to-square')} 重命名`)}${button('import', `${icon('file-import')} 导入`)}${button('export', `${icon('file-export')} 导出`)}${button('delete-preset', `${icon('trash-can')} 删除`, 'class="vrl-danger"')}
                 </div></section><section class="vrl-rules-section"><div class="vrl-section-title"><h3>规则集</h3><div class="vrl-rule-actions">${button('add-group', `${icon('plus')} 添加`, 'class="vrl-primary"')}${button('search', `${icon('magnifying-glass')} 搜索`)}${button('edit-groups', `${icon('pen-to-square')} 编辑分组`)}${button('reverse', `${icon('arrow-down-up-across-line')} 反序排列`)}</div></div>
                     <div id="vrl-search-wrap" class="vrl-search" hidden><input id="vrl-search" type="search" placeholder="搜索匹配词、替换词、备注或分组" aria-label="搜索规则">${button('clear-search', icon('xmark'), 'class="vrl-icon" aria-label="清空搜索"')}</div>
-                    <div id="vrl-groups"></div></section></div><footer class="vrl-main-footer"><span>回复完成后本地替换</span><span id="vrl-saved">自动保存</span><a href="https://github.com/The-Veridis-Lion/Veridis-Rewrite" target="_blank" rel="noopener noreferrer">基于 Veridis Rewrite</a></footer><input type="file" id="vrl-file" accept="application/json,.json" hidden>`);
+                    <div id="vrl-groups"></div></section></div><footer class="vrl-main-footer"><div class="vrl-refresh-control">${button('refresh-body', `${icon('rotate-right')} 立即刷新正文`, 'class="vrl-primary" title="用当前规则重新处理最新一条助手回复"')}<span id="vrl-refresh-status" role="status">作用于最新一条助手回复</span></div><div class="vrl-footer-meta"><span id="vrl-saved">自动保存</span><a href="https://github.com/The-Veridis-Lion/Veridis-Rewrite" target="_blank" rel="noopener noreferrer">基于 Veridis Rewrite</a></div></footer><input type="file" id="vrl-file" accept="application/json,.json" hidden>`);
             main.addEventListener('click', event => { const target = event.target.closest('button[data-action]'); if (target && !target.disabled) handleAction(target.dataset.action, target); });
             main.addEventListener('change', event => {
                 const input = event.target;

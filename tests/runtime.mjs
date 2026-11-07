@@ -99,3 +99,41 @@ test('saving failures surface to the user',async()=>{
 test('disposing removes listeners and pending work',async()=>{
     const f=fixture();f.host.chat.push(f.message('极其'));await f.receipt(0);f.cleaner.dispose();await f.tick();assert.equal(f.saves,0);assert.ok([...f.bus.events.values()].every(list=>!list.length));
 });
+
+test('manual refresh applies newly added rules to the latest assistant only',async()=>{
+    const f=fixture('甲','乙'),old=f.message('旧甲'),latest=f.message('新甲');
+    f.host.chat.push(old,latest,{is_user:true,mes:'用户甲'});const result=await f.cleaner.refreshLatest();
+    assert.equal(result.status,'applied');assert.equal(latest.mes,'新乙');assert.equal(latest.swipes[0],'新乙');assert.equal(old.mes,'旧甲');assert.equal(f.host.chat[2].mes,'用户甲');assert.equal(f.saves,1);f.cleaner.dispose();
+});
+test('manual refresh remains available when automatic processing is paused',async()=>{
+    const f=fixture();f.state.enabled=false;f.host.chat.push(f.message('极其'));assert.equal((await f.cleaner.refreshLatest()).status,'applied');assert.equal(f.host.chat[0].mes,'');f.cleaner.dispose();
+});
+test('manual refresh re-evaluates current rules without accumulating earlier replacements',async()=>{
+    const f=fixture('a','aa'),m=f.message('a');f.host.chat.push(m);await f.receipt(0);await f.tick();
+    assert.equal((await f.cleaner.refreshLatest()).status,'unchanged');assert.equal(m.mes,'aa');
+    activePreset(f.state).rules[0].subRules.push({mode:'text',enabled:true,targets:['z'],replacements:[]});
+    assert.equal((await f.cleaner.refreshLatest()).status,'unchanged');assert.equal(m.mes,'aa');assert.equal(f.saves,1);f.cleaner.dispose();
+});
+test('manual refresh respects external edits and preserves appended content',async()=>{
+    const f=fixture('甲','乙'),m=f.message('甲');f.host.chat.push(m);await f.receipt(0);await f.tick();
+    m.mes+='\n<StatusPlaceHolderImpl/>';m.swipes[0]=m.mes;
+    activePreset(f.state).rules[0].subRules[0].replacements=['丙'];await f.cleaner.refreshLatest();assert.equal(m.mes,'丙\n<StatusPlaceHolderImpl/>');
+    m.mes='手动甲';m.swipes[0]=m.mes;await f.bus.emit(types.MESSAGE_EDITED,0);await f.cleaner.refreshLatest();assert.equal(m.mes,'手动丙');f.cleaner.dispose();
+});
+test('manual refresh after continuation uses the known original prefix without duplication',async()=>{
+    const f=fixture('a','aa'),m=f.message('a');f.host.chat.push(m);await f.receipt(0);await f.tick();await f.start('continue');m.mes+=' a';m.swipes[0]=m.mes;await f.receipt(0,'continue');await f.end();await f.tick();
+    assert.equal(m.mes,'aa aa');assert.equal((await f.cleaner.refreshLatest()).status,'unchanged');assert.equal(m.mes,'aa aa');f.cleaner.dispose();
+});
+test('manual refresh rejects active generation, bad rules and incomplete Swipe slots',async()=>{
+    const f=fixture(),m=f.message('极其');f.host.chat.push(m);await f.start();assert.equal((await f.cleaner.refreshLatest()).status,'busy');await f.end();
+    m.swipes=[];assert.equal((await f.cleaner.refreshLatest()).status,'busy');m.swipes=['极其'];
+    activePreset(f.state).rules[0].subRules=[{mode:'regex',enabled:true,targets:['['],replacements:[]}];assert.equal((await f.cleaner.refreshLatest()).status,'error');assert.equal(m.mes,'极其');assert.equal(f.saves,0);f.cleaner.dispose();
+});
+test('manual refresh reports empty chats and failed saves without claiming success',async()=>{
+    const f=fixture();assert.equal((await f.cleaner.refreshLatest()).status,'empty');f.host.chat.push(f.message('极其'));f.host.saveChat=async()=>{throw Error('offline')};assert.equal((await f.cleaner.refreshLatest()).status,'save-failed');f.cleaner.dispose();
+});
+test('a failed manual save can be retried without repeating the replacement',async()=>{
+    const f=fixture('a','aa'),m=f.message('a');f.host.chat.push(m);f.host.saveChat=async()=>{throw Error('offline')};
+    assert.equal((await f.cleaner.refreshLatest()).status,'save-failed');assert.equal(m.mes,'aa');let saved=0;f.host.saveChat=async()=>{saved++};
+    assert.equal((await f.cleaner.refreshLatest()).status,'saved');assert.equal(m.mes,'aa');assert.equal(saved,1);f.cleaner.dispose();
+});

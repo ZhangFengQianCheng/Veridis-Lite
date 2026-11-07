@@ -11,11 +11,15 @@ const {chromium} = process.env.VRL_TEST_MODULES
 const root=path.resolve(fileURLToPath(new URL('..',import.meta.url)));
 const output=path.join(root,'test-results');fs.mkdirSync(output,{recursive:true});
 const prefix='/scripts/extensions/third-party/Veridis-Lite/';
+const nativeRow=label=>`<div class="extension_container"><div class="inline-drawer"><div class="inline-drawer-toggle inline-drawer-header"><b>${label}</b><span aria-hidden="true">⌄</span></div></div></div>`;
 const fixture=`<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Veridis Lite isolated fixture</title><link rel="stylesheet" href="${prefix}style.css"><style>
 html,body{margin:0;height:100%;font-family:'Segoe UI','Microsoft YaHei',sans-serif;background:#151713;color:#ddd}body{background:radial-gradient(ellipse at 50% 30%,#33372b,#151713 75%)}
 :root{--SmartThemeBlurTintColor:#25271f;--SmartThemeBodyColor:#e7e7de;--SmartThemeBorderColor:#3a3d32;--SmartThemeQuoteColor:#d6bb6d}
-#host-chat{max-width:750px;margin:100px auto;opacity:.5;padding:30px}#extensionsMenu{position:absolute;top:18px;left:20px}#extensions_settings2{display:none}
-</style></head><body><div id="extensionsMenu"></div><div id="extensions_settings2"></div><div id="host-chat"><p>SillyTavern · 隔离测试环境</p><p>真实扩展界面，模拟酒馆事件与保存接口。</p></div><script type="module" src="${prefix}index.js"></script></body></html>`;
+body{display:block;overflow:auto;min-height:100vh}#extensionsMenu{position:absolute;top:15px;left:20px}
+#host-panel{width:min(1024px,calc(100vw - 32px));margin:65px auto 25px;padding:12px;background:var(--SmartThemeBlurTintColor);border:1px solid var(--SmartThemeBorderColor);border-radius:10px}#host-panel>h3{margin:0 0 12px;font-size:20px}.vrl-host-columns{display:flex;gap:10px}.vrl-host-columns>div{flex:1;min-width:0;width:50%}
+.menu_button{width:min-content}.inline-drawer-header{display:flex;align-items:center;justify-content:space-between;border:1px solid var(--SmartThemeBorderColor);border-radius:9px;padding:4px 7px;margin-bottom:5px;font-size:16px;background:linear-gradient(348deg,#ffffff10,#0009)}
+@media(max-width:600px){#host-panel{margin-top:60px}.vrl-host-columns{flex-direction:column}.vrl-host-columns>div{width:100%}}
+</style></head><body><div id="extensionsMenu"></div><section id="host-panel"><h3>扩展程序</h3><div class="vrl-host-columns"><div id="extensions_settings" class="flex1 wide50p">${['下载扩展程序和资源','角色表情','图像生成','图像提示词模板','TTS','提示词模板','故事神谕','酒馆助手'].map(nativeRow).join('')}</div><div id="extensions_settings2" class="flex1 wide50p">${['快速回复','QR助手','聊天翻译','图片描述','总结','正则','向量存储','鸡尾酒'].map(nativeRow).join('')}</div></div></section><script type="module" src="${prefix}index.js"></script></body></html>`;
 const host=`
 class Events{constructor(){this.listeners=new Map()}on(k,f){if(!this.listeners.has(k))this.listeners.set(k,[]);this.listeners.get(k).push(f)}removeListener(k,f){this.listeners.set(k,this.listeners.get(k).filter(x=>x!==f))}async emit(k,...args){for(const f of [...(this.listeners.get(k)||[])])await f(...args)}}
 export const extension_settings=JSON.parse(sessionStorage.getItem('settings')||'{"ultimate_purifier_ai_rewrite":{"untouched":true}}');
@@ -48,7 +52,14 @@ const nameDialog=()=>page.locator('.vrl-name-dialog');
 const ruleDialog=()=>page.locator('.vrl-rule-dialog');
 
 try{
-    await page.goto('http://veridis-lite.test/');await page.locator('#vrl-launcher').click();
+    await page.goto('http://veridis-lite.test/');await page.locator('#vrl-settings .vrl-settings-entry').waitFor();
+    for(const width of [1360,390]){
+        await page.setViewportSize({width,height:960});await page.locator('#vrl-settings').scrollIntoViewIfNeeded();
+        const size=await page.locator('#vrl-settings .vrl-settings-entry').evaluate(button=>{const b=button.getBoundingClientRect(),p=button.parentElement.getBoundingClientRect();return{width:b.width,parent:p.width,height:b.height,nowrap:getComputedStyle(button).whiteSpace,writingMode:getComputedStyle(button).writingMode}});
+        check(`native extension entry stays horizontal at ${width}px`,size.width>=size.parent-2&&size.height<=60&&size.nowrap==='nowrap'&&size.writingMode==='horizontal-tb');
+    }
+    await page.setViewportSize({width:1360,height:960});await page.locator('#host-panel').scrollIntoViewIfNeeded();await page.screenshot({path:path.join(output,'native-panel-preview.png')});await page.locator('#host-panel').screenshot({path:path.join(output,'native-panel-crop.png')});
+    await page.locator('#vrl-settings .vrl-settings-entry').click();
     await page.locator('.vrl-main-dialog[open]').waitFor();
     check('single-page shell opens without host dependencies');
     check('fresh install has no saved preset or rule', await page.locator('#vrl-preset').isDisabled()
@@ -73,6 +84,9 @@ try{
         return ctx.chat.pop().mes === '示例回复' && window.__saves === 0 && window.__notices.length === 0;
     });
     check('generation without a preset leaves the chat untouched', untouched);
+    await click('refresh-body');
+    await page.waitForFunction(() => document.querySelector('#vrl-refresh-status').textContent.includes('请先新建或导入预设'));
+    check('manual cleanup without a preset prompts for setup');
     check('model settings and old navigation are absent',!await page.locator('.vrl-main-dialog').innerText().then(t=>/AI|Deep Clean|透视|改写要求/.test(t)));
     const legacy={type:'veridis-rewrite-preset',version:2,rules:[{name:'示例词汇',enabled:true,subRules:[
         {mode:'text',targets:['以太'],replacements:['魔力'],enabled:true},
@@ -97,6 +111,12 @@ try{
     });
     await page.waitForFunction(()=>window.__host.ctx.chat[0].mes==='刚才，一小时前出现了魔力。');
     check('actual entry responds to host completion events and synchronizes Swipe',await page.evaluate(()=>window.__saves===1&&window.__host.ctx.chat[0].swipes[0]===window.__host.ctx.chat[0].mes));
+    await page.evaluate(()=>{const s=window.__host.extension_settings.veridis_lite;const p=s.presets.find(p=>p.id===s.activePresetId);p.rules[0].subRules.push({id:'manual-rule',mode:'text',enabled:true,targets:['出现了'],replacements:['产生了'],remark:''})});
+    await click('refresh-body');await page.waitForFunction(()=>window.__host.ctx.chat[0].mes==='刚才，一小时前产生了魔力。');
+    check('manual refresh applies a newly added rule and synchronizes the current Swipe',await page.evaluate(()=>window.__host.ctx.chat[0].swipes[0]===window.__host.ctx.chat[0].mes));
+    check('manual refresh displays a concrete completion status',(await page.locator('#vrl-refresh-status').innerText()).includes('已刷新'));
+    const savedBeforeRepeat=await page.evaluate(()=>window.__saves);await click('refresh-body');await page.waitForFunction(()=>document.querySelector('#vrl-refresh-status').textContent.includes('无需修改'));
+    check('repeated manual refresh has no extra write',await page.evaluate(()=>window.__saves)===savedBeforeRepeat);
 
     await click('add-group');await nameDialog().locator('input').fill('标点与口癖');await nameDialog().getByRole('button',{name:'保存',exact:true}).click();
     let card=page.locator('.vrl-card').filter({has:page.getByRole('button',{name:'标点与口癖',exact:true})});
@@ -144,6 +164,7 @@ try{
         await page.setViewportSize({width,height});
         const layout=await page.locator('.vrl-main-dialog').evaluate(node=>{const b=node.getBoundingClientRect();return {left:b.left,right:b.right,top:b.top,bottom:b.bottom,width:innerWidth,height:innerHeight,overflow:node.scrollWidth>node.clientWidth+1}});
         check(`layout fits ${width}px`,layout.left>=0&&layout.top>=0&&layout.right<=width+.5&&layout.bottom<=height+.5&&!layout.overflow);
+        if(width<=390){const rows=await page.locator('.vrl-preset-actions').evaluate(node=>[...node.children].map(child=>Math.round(child.getBoundingClientRect().top)));check(`preset actions stay on one row at ${width}px`,new Set(rows).size===1);}
         if(width===390)await page.screenshot({path:path.join(output,'mobile-preview.png')});
     }
     await page.locator('.vrl-card').first().locator('[data-action="add-rule"]').click();

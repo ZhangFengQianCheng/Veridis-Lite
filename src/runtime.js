@@ -15,17 +15,76 @@ function branchOf(message) {
 // deferred completion pass. No streaming monkey-patches or per-token processing.
 export function createMessageCleaner({ getContext, getState, eventSource, eventTypes, notify = () => {}, defer = setTimeout, cancelDefer = clearTimeout }) {
     const pending = new Map(), results = new WeakMap(), listeners = [];
-    let active = false, timer = null, continuation = null, disposed = false, draining = false;
+    let active = false, timer = null, continuation = null, disposed = false, draining = false, manualRunning = false, lastRun = null;
     const assistant = msg => msg && msg.is_user !== true && msg.is_system !== true && typeof msg.mes === 'string';
     const identity = ctx => String(ctx.getCurrentChatId?.() ?? ctx.chatId ?? ctx.chat_id ?? '');
     const on = (key, listener) => { if (eventTypes[key]) { eventSource.on(eventTypes[key], listener); listeners.push([eventTypes[key], listener]); } };
     const schedule = (delay = 0) => {
-        if (disposed || timer !== null || active || !pending.size) return;
+        if (disposed || timer !== null || active || manualRunning || !pending.size) return;
         timer = defer(() => { timer = null; void drain(); }, delay);
     };
 
+    const sourceFor = (msg, branch) => {
+        if (lastRun?.message !== msg || lastRun.branch !== branch.key) return msg.mes;
+        if (msg.mes === lastRun.output) return lastRun.source;
+        if (lastRun.output && msg.mes.startsWith(lastRun.output)) return lastRun.source + msg.mes.slice(lastRun.output.length);
+        return msg.mes;
+    };
+
+    async function writeResult(ctx, index, msg, branch, source, result, manual = false) {
+        const report = (status, message) => {
+            if (!manual) notify(message, status === 'save-failed' || status === 'error' ? 'error' : 'warning');
+            return { status, message, changes: result.changes, index };
+        };
+        const changed = result.text !== msg.mes;
+        const retrySave = !changed && lastRun?.message === msg && lastRun.branch === branch.key && lastRun.persisted === false;
+        if ((changed || retrySave) && typeof ctx.saveChat !== 'function') return report('error', '酒馆未提供保存接口，未修改消息。');
+        if (!results.has(msg)) results.set(msg, new Map());
+        results.get(msg).set(branch.key, result.text);
+        const record = lastRun = { message: msg, branch: branch.key, source, output: result.text, persisted: !changed && !retrySave };
+        if (!changed && !retrySave) return { status: 'unchanged', changes: 0, index, message: '最新回复已符合当前规则，无需修改。' };
+        msg.mes = result.text;
+        if (branch.index >= 0) {
+            const slot = msg.swipes[branch.index];
+            if (typeof slot === 'string') msg.swipes[branch.index] = result.text;
+            else slot.mes = result.text;
+        }
+        if (msg.extra) delete msg.extra.display_text;
+        const extra = msg.swipe_info?.[branch.index]?.extra;
+        if (extra) delete extra.display_text;
+        let displayFailed = false;
+        try { if (changed) ctx.updateMessageBlock?.(index, msg); }
+        catch { displayFailed = true; }
+        try { await ctx.saveChat(); }
+        catch { return report('save-failed', '正文已更新，但保存失败，请检查酒馆服务后手动保存聊天。'); }
+        record.persisted = true;
+        if (displayFailed) return report('display-failed', '正文已保存，显示刷新失败，可重新打开聊天查看。');
+        if (retrySave) return { status: 'saved', changes: 0, index, message: '最新回复已重新保存。' };
+        return { status: 'applied', changes: result.changes, index, message: result.changes ? `最新回复已刷新，替换 ${result.changes} 处。` : '最新回复已按当前规则刷新。' };
+    }
+
+    async function refreshLatest() {
+        const ctx = getContext();
+        if (disposed) return { status: 'error', message: '扩展已卸载，请刷新页面。' };
+        if (active || draining || manualRunning || ctx.streamingProcessor?.isStopped === false) return { status: 'busy', message: '请等当前回复生成或保存完成后再刷新。' };
+        const preset = activePreset(getState());
+        if (!preset) return { status: 'empty', message: '请先新建或导入预设。' };
+        const index = ctx.chat?.findLastIndex(assistant) ?? -1, msg = ctx.chat?.[index];
+        if (!msg) return { status: 'empty', message: '当前聊天还没有可刷新的助手回复。' };
+        const branch = branchOf(msg);
+        if (!branch) return { status: 'busy', message: '当前回复的 Swipe 尚未保存完成，请稍后再试。' };
+        manualRunning = true;
+        try {
+            const source = sourceFor(msg, branch);
+            const compiled = compileRules(preset.rules);
+            if (compiled.errors.length) return { status: 'error', message: `有 ${compiled.errors.length} 条无效规则，请先修正后再刷新。` };
+            pending.delete(msg);
+            return await writeResult(ctx, index, msg, branch, source, applyRules(source, compiled), true);
+        } finally { manualRunning = false; schedule(); }
+    }
+
     async function drain() {
-        if (disposed || active || draining) return;
+        if (disposed || active || draining || manualRunning) return;
         draining = true;
         try {
             let retry = false;
@@ -53,23 +112,8 @@ export function createMessageCleaner({ getContext, getState, eventSource, eventT
                 const { processors, errors } = compileRules(preset.rules);
                 if (errors.length) notify(`有 ${errors.length} 条无效规则已跳过，请在规则中修正。`, 'warning');
                 const result = applyRules(msg.mes, { processors }, { startAt });
-                if (!results.has(msg)) results.set(msg, new Map());
-                results.get(msg).set(branch.key, result.text);
-                if (result.text === msg.mes) continue;
-                if (typeof ctx.saveChat !== 'function') { results.get(msg).delete(branch.key); notify('酒馆未提供保存接口，未修改消息。', 'error'); continue; }
-                msg.mes = result.text;
-                if (branch.index >= 0) {
-                    const slot = msg.swipes[branch.index];
-                    if (typeof slot === 'string') msg.swipes[branch.index] = result.text;
-                    else slot.mes = result.text;
-                }
-                if (msg.extra) delete msg.extra.display_text;
-                const extra = msg.swipe_info?.[branch.index]?.extra;
-                if (extra) delete extra.display_text;
-                try { ctx.updateMessageBlock?.(target.index, msg); }
-                catch { notify('正文已替换，消息显示刷新失败，可重新打开聊天查看。', 'warning'); }
-                try { await ctx.saveChat(); }
-                catch { notify('净化结果保存失败，请检查酒馆服务后手动保存聊天。', 'error'); }
+                const source = target.base !== null ? (target.sourceBase ?? target.base) + msg.mes.slice(target.base.length) : msg.mes;
+                await writeResult(ctx, target.index, msg, branch, source, result);
             }
             if (retry) schedule(100);
         } finally { draining = false; if (pending.size && timer === null && !active) schedule(); }
@@ -80,7 +124,9 @@ export function createMessageCleaner({ getContext, getState, eventSource, eventT
         active = true;
         pending.clear();
         const ctx = getContext(), msg = ctx.chat?.at(-1);
-        continuation = ['continue', 'append', 'appendFinal'].includes(type) && assistant(msg) ? { msg, base: msg.mes } : null;
+        const branch = assistant(msg) ? branchOf(msg) : null;
+        continuation = ['continue', 'append', 'appendFinal'].includes(type) && assistant(msg)
+            ? { msg, base: msg.mes, sourceBase: branch ? sourceFor(msg, branch) : msg.mes } : null;
     });
     on('MESSAGE_RECEIVED', (value, type) => {
         if (type === 'first_message' || type === 'quiet' || type === 'impersonate') return;
@@ -88,7 +134,8 @@ export function createMessageCleaner({ getContext, getState, eventSource, eventT
         const ctx = getContext(), msg = ctx.chat?.[index];
         if (!Number.isInteger(index) || !assistant(msg)) return;
         pending.set(msg, { index, chat: ctx.chat, chatId: identity(ctx), swipeId: msg.swipe_id, attempts: 0,
-            base: continuation?.msg === msg ? continuation.base : null });
+            base: continuation?.msg === msg ? continuation.base : null,
+            sourceBase: continuation?.msg === msg ? continuation.sourceBase : null });
         schedule();
     });
     on('CHARACTER_MESSAGE_RENDERED', () => schedule());
@@ -96,14 +143,16 @@ export function createMessageCleaner({ getContext, getState, eventSource, eventT
         const index = Number.isInteger(value) ? value : value?.messageId;
         const msg = getContext().chat?.[index];
         if (msg) pending.delete(msg);
+        if (lastRun?.message === msg) lastRun = null;
     };
     on('MESSAGE_EDITED', forgetMessage);
     on('MESSAGE_SWIPED', forgetMessage);
     on('GENERATION_ENDED', () => { active = false; schedule(); });
     on('GENERATION_STOPPED', () => { active = false; schedule(); });
-    on('CHAT_CHANGED', () => { pending.clear(); continuation = null; active = false; if (timer !== null) cancelDefer(timer); timer = null; });
+    on('CHAT_CHANGED', () => { pending.clear(); continuation = null; lastRun = null; active = false; if (timer !== null) cancelDefer(timer); timer = null; });
     return {
         flush: drain,
+        refreshLatest,
         dispose() { disposed = true; if (timer !== null) cancelDefer(timer); pending.clear(); for (const [key, listener] of listeners) eventSource.removeListener(key, listener); },
     };
 }
