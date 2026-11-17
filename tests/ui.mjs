@@ -34,7 +34,7 @@ window.__host={ctx,eventSource,event_types,extension_settings};ctx.chat.forEach(
 const browser=await chromium.launch({headless:true,executablePath:process.env.VRL_TEST_CHROME||undefined});
 const page=await browser.newPage({viewport:{width:1360,height:960},deviceScaleFactor:1});
 const errors=[], checks=[];page.on('pageerror',error=>errors.push(error.message));page.on('dialog',dialog=>dialog.accept());
-await page.route('**/*',async route=>{
+const serve=async route=>{
     const pathname=new URL(route.request().url()).pathname;
     if(pathname==='/')return route.fulfill({contentType:'text/html',body:fixture});
     if(pathname==='/fixture-host.js')return route.fulfill({contentType:'text/javascript',body:host});
@@ -45,7 +45,8 @@ await page.route('**/*',async route=>{
         if(filename.startsWith(root+path.sep)&&fs.existsSync(filename))return route.fulfill({contentType:filename.endsWith('.css')?'text/css':'text/javascript',body:fs.readFileSync(filename)});
     }
     return route.abort();
-});
+};
+await page.route('**/*',serve);
 const check=(name,value=true)=>{assert.ok(value,name);checks.push(name)};
 const settings=()=>page.evaluate(()=>window.__host.extension_settings.veridis_lite);
 const click=action=>page.locator(`.vrl-main-dialog [data-action="${action}"]`).first().click();
@@ -146,7 +147,7 @@ try{
     const snippet=await page.locator('.vrl-diff-body').innerText();
     check('snippet shows one complete changed sentence without neighbouring prose',await page.locator('.vrl-diff-fragment').count()===1&&!snippet.includes('她换好衣服')&&!snippet.includes('守卫叫她停下')&&snippet.endsWith('。'));
     await page.locator('.vrl-diff-dialog').screenshot({path:path.join(output,'sentence-snippet-preview.png')});
-    const savesBeforeView=await page.evaluate(()=>window.__saves);await page.locator('.vrl-diff-dialog [data-mode]').click();
+    const savesBeforeView=await page.evaluate(()=>window.__saves);await page.locator('.vrl-diff-dialog [data-mode="full"]').click();
     check('full text comparison opens without editing the chat',await page.locator('.vrl-diff-prose').count()===1&&await page.evaluate(()=>window.__saves)===savesBeforeView);
     check('full comparison still includes unmodified neighbouring sentences',(await page.locator('.vrl-diff-prose').innerText()).includes('守卫叫她停下'));
     await page.screenshot({path:path.join(output,'comparison-preview.png')});await page.locator('.vrl-diff-dialog [data-close]').click();
@@ -185,6 +186,7 @@ try{
     await card.locator('[data-action="add-rule"]').click();await ruleDialog().locator('[name="mode"]').selectOption('regex');
     await ruleDialog().locator('[name="targets"]').fill('[');await ruleDialog().getByRole('button',{name:'保存规则',exact:true}).click();
     check('invalid regex produces an inline error',await ruleDialog().locator('#vrl-rule-error').isVisible());
+    await ruleDialog().screenshot({path:path.join(output,'rule-editor-preview.png')});
     await ruleDialog().locator('[name="targets"]').fill('/——+/g');await ruleDialog().locator('[name="replacements"]').fill('，');
     await ruleDialog().getByRole('button',{name:'保存规则',exact:true}).click();
     await card.locator('[data-action="add-rule"]').click();await ruleDialog().locator('[name="mode"]').selectOption('simple');
@@ -204,6 +206,7 @@ try{
     await click('edit-groups');const groupEditor=page.locator('.vrl-groups-dialog');
     await groupEditor.locator('.vrl-group-edit-row').last().getByRole('button',{name:'上移分组'}).click();
     check('group ordering persists',(await settings()).presets.at(-1).rules[0].name==='标点与口癖');
+    await groupEditor.screenshot({path:path.join(output,'groups-preview.png')});
     await groupEditor.getByRole('button',{name:'完成',exact:true}).click();await click('reverse');
     check('reverse order affects the saved list',(await settings()).presets.at(-1).rules[0].name==='示例词汇');
 
@@ -274,6 +277,29 @@ try{
     await page.screenshot({path:path.join(output,'mobile-editor.png')});
     await ruleDialog().locator('[data-action="close"]').first().click();
     await page.setViewportSize({width:1360,height:960});
+    // Normalize any CSS color syntax (rgb(), color(srgb …)) to rgb() including alpha via a 1px canvas.
+    const panelColor=()=>page.locator('.vrl-main-dialog').evaluate(node=>{
+        const ctx=Object.assign(document.createElement('canvas'),{width:1,height:1}).getContext('2d');
+        ctx.fillStyle=getComputedStyle(node).backgroundColor;ctx.fillRect(0,0,1,1);
+        const [r,g,b,a]=ctx.getImageData(0,0,1,1).data;
+        return a===255?`rgb(${r}, ${g}, ${b})`:`rgba(${r}, ${g}, ${b}, ${a})`;
+    });
+    const htmlTheme=()=>page.evaluate(()=>document.documentElement.dataset.vrlTheme);
+    check('the default palette ignores the tavern theme colors',await panelColor()==='rgb(28, 29, 32)'&&await htmlTheme()==='default');
+    await click('settings');
+    check('the palette setting starts on the built-in colors',await preferences.getByRole('radio',{name:'默认',exact:true}).isChecked());
+    await preferences.getByRole('radio',{name:'跟随酒馆',exact:true}).check();
+    check('choosing a palette previews it before saving',await htmlTheme()==='tavern'&&await panelColor()==='rgb(37, 39, 31)');
+    await preferences.screenshot({path:path.join(output,'settings-preview.png')});
+    await preferences.getByRole('button',{name:'取消',exact:true}).click();
+    check('cancelling settings restores the saved palette',await htmlTheme()==='default'&&(await settings()).theme==='default');
+    await click('settings');
+    await preferences.getByRole('radio',{name:'跟随酒馆',exact:true}).check();
+    await savePreferences();
+    check('the follow-tavern palette is saved and uses the tavern tint',(await settings()).theme==='tavern'&&await panelColor()==='rgb(37, 39, 31)');
+    await page.screenshot({path:path.join(output,'tavern-preview.png')});
+    await page.evaluate(()=>document.documentElement.style.setProperty('--SmartThemeBlurTintColor','rgba(250, 249, 246, 0.55)'));
+    check('a translucent tavern tint is drawn as an opaque panel',await panelColor()==='rgb(250, 249, 246)');
     await page.evaluate(()=>{document.documentElement.style.setProperty('--SmartThemeBlurTintColor','#faf9f6');document.documentElement.style.setProperty('--SmartThemeBodyColor','#292c25');document.documentElement.style.setProperty('--SmartThemeBorderColor','#deddd5');document.documentElement.style.setProperty('--SmartThemeQuoteColor','#86661e')});
     await page.waitForTimeout(350);
     await page.screenshot({path:path.join(output,'light-preview.png')});
@@ -293,6 +319,36 @@ try{
         return (light+0.05)/(dark+0.05);
     });
     check(`light theme primary button contrast is readable (${primaryContrast.toFixed(2)}:1)`,primaryContrast>=4.5);
+    await page.reload();await page.locator('#vrl-settings .vrl-settings-entry').waitFor();
+    check('the saved palette is applied again after a reload',await htmlTheme()==='tavern');
+
+    // A touch phone: coarse pointer, mobile viewport, same saved presets and chat.
+    const seeded=await page.evaluate(()=>{const s=JSON.parse(sessionStorage.getItem('settings'));s.veridis_lite.theme='default';return [JSON.stringify(s),sessionStorage.getItem('chat')]});
+    const phone=await browser.newContext({viewport:{width:390,height:844},deviceScaleFactor:2,isMobile:true,hasTouch:true});
+    await phone.addInitScript(([s,c])=>{if(!sessionStorage.getItem('settings')){sessionStorage.setItem('settings',s);sessionStorage.setItem('chat',c)}},seeded);
+    const touch=await phone.newPage();touch.on('pageerror',error=>errors.push(error.message));touch.on('dialog',dialog=>dialog.accept());
+    await touch.route('**/*',serve);await touch.goto('http://veridis-lite.test/');
+    await touch.locator('#vrl-settings .vrl-settings-entry').tap();await touch.locator('.vrl-main-dialog[open]').waitFor();
+    const touchLayout=await touch.locator('.vrl-main-dialog').evaluate(node=>{
+        const b=node.getBoundingClientRect(),scroll=node.querySelector('.vrl-main-scroll');
+        const rows=[...node.querySelectorAll('.vrl-rule-row')].map(row=>row.getBoundingClientRect().right);
+        const small=[...node.querySelectorAll('button:not([hidden]), summary, .vrl-check')].filter(el=>el.offsetParent&&el.getBoundingClientRect().height<35.5).length;
+        return {full:b.left===0&&b.top===0&&Math.round(b.right)===innerWidth&&Math.round(b.bottom)===innerHeight,overflow:scroll.scrollWidth>scroll.clientWidth+1,rowsInside:rows.every(r=>r<=innerWidth),small};
+    });
+    check('touch phones get a full-screen window without sideways scrolling '+JSON.stringify(touchLayout),touchLayout.full&&!touchLayout.overflow&&touchLayout.rowsInside);
+    check('touch targets are at least 36px tall',touchLayout.small===0);
+    await touch.screenshot({path:path.join(output,'touch-preview.png')});
+    await touch.locator('.vrl-main-dialog [data-action="show-comparison"]').tap();
+    await touch.locator('.vrl-diff-body del').first().waitFor();
+    const touchDiff=await touch.locator('.vrl-diff-dialog').evaluate(node=>{const b=node.getBoundingClientRect();return b.left===0&&Math.round(b.right)===innerWidth&&Math.round(b.bottom)===innerHeight});
+    check('the comparison window is full-screen on a phone',touchDiff);
+    await touch.screenshot({path:path.join(output,'touch-comparison.png')});
+    await touch.locator('.vrl-diff-dialog [data-close]').tap();
+    await touch.locator('.vrl-main-dialog [data-action="settings"]').tap();
+    const touchSettings=touch.getByRole('dialog',{name:'设置',exact:true});
+    check('settings fit a touch phone',await touchSettings.evaluate(node=>{const b=node.getBoundingClientRect();return b.left>=0&&b.right<=innerWidth&&b.top>=0&&b.bottom<=innerHeight}));
+    await touch.screenshot({path:path.join(output,'touch-settings.png')});
+    await phone.close();
     check('no uncaught browser errors',errors.length===0);
     console.log(JSON.stringify({checks:checks.length,results:checks,errors,scope:'headless Chromium; real extension source; simulated host and storage; no model calls or desktop control'},null,2));
 }finally{

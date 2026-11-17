@@ -80,7 +80,7 @@ test('multiline literals and replacements survive JSON round trips', () => {
 });
 test('own settings are independent and preset names stay unique', () => {
     const empty = createState();
-    assert.deepEqual(empty, { version: 1, enabled: true, showInMagicWand: true, manualCleanLimit: null, activePresetId: null, presets: [] });
+    assert.deepEqual(empty, { version: 1, enabled: true, showInMagicWand: true, manualCleanLimit: null, theme: 'default', activePresetId: null, presets: [] });
     assert.deepEqual(loadState(undefined), empty);
     const paused = { ...empty, enabled: false };
     assert.deepEqual(loadState(paused), paused);
@@ -96,6 +96,10 @@ test('own settings are independent and preset names stay unique', () => {
     assert.deepEqual(loadState(configured), configured);
     for (const invalid of [0, -1, 1.5, '12', Number.MAX_SAFE_INTEGER + 1]) {
         assert.equal(loadState({ ...configured, manualCleanLimit: invalid }).manualCleanLimit, null);
+    }
+    assert.equal(loadState({ ...configured, theme: 'tavern' }).theme, 'tavern');
+    for (const invalid of [undefined, null, 'dark', 1]) {
+        assert.equal(loadState({ ...configured, theme: invalid }).theme, 'default');
     }
     assert.throws(()=>loadState({presets:[{}]}));
 });

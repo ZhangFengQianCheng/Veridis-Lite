@@ -2,7 +2,7 @@ import { extension_settings, getContext } from '../../../extensions.js';
 import { eventSource, event_types, saveSettingsDebounced } from '../../../../script.js';
 import { SETTINGS_KEY, loadState } from './src/model.js';
 import { createMessageCleaner } from './src/runtime.js';
-import { createUI } from './src/ui.js';
+import { applyTheme, createUI } from './src/ui.js';
 import { createDiffViewer } from './src/diffView.js';
 
 const notify = (message, kind = 'info') => {
@@ -13,9 +13,11 @@ const notify = (message, kind = 'info') => {
 
 try {
     const state = loadState(extension_settings[SETTINGS_KEY]);
+    applyTheme(state.theme);
     const save = () => {
         extension_settings[SETTINGS_KEY] = state;
         saveSettingsDebounced();
+        applyTheme(state.theme);
         mount();
     };
     const viewer = createDiffViewer({ getContext, eventSource, eventTypes: event_types });

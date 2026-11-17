@@ -62,8 +62,11 @@ export function normalizeManualCleanLimit(value) {
     return Number.isSafeInteger(value) && value > 0 ? value : null;
 }
 
+export const THEMES = ['default', 'tavern'];
+export const normalizeTheme = value => THEMES.includes(value) ? value : 'default';
+
 export function createState() {
-    return { version: 1, enabled: true, showInMagicWand: true, manualCleanLimit: null, activePresetId: null, presets: [] };
+    return { version: 1, enabled: true, showInMagicWand: true, manualCleanLimit: null, theme: 'default', activePresetId: null, presets: [] };
 }
 
 export function loadState(stored) {
@@ -79,6 +82,7 @@ export function loadState(stored) {
     state.enabled = state.enabled !== false;
     state.showInMagicWand = state.showInMagicWand !== false;
     state.manualCleanLimit = normalizeManualCleanLimit(state.manualCleanLimit);
+    state.theme = normalizeTheme(state.theme);
     if (!state.presets.some(p => p.id === state.activePresetId)) state.activePresetId = state.presets[0]?.id ?? null;
     return state;
 }

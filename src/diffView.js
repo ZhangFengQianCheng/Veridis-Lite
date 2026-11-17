@@ -1,5 +1,6 @@
 import { escapeHtml } from './diff.js';
 import { branchOf, getHistory, proseForDiff, recentAssistantIndices } from './history.js';
+import { icon } from './icons.js';
 
 export function renderComparison(operations, mode = 'snippet') {
     const run = op => op.type === 'delete' ? `<del>${escapeHtml(op.text)}</del>`
@@ -44,11 +45,13 @@ export function createDiffViewer({ getContext, eventSource, eventTypes }) {
         const history = getHistory(getContext().chat[index]);
         return history && history.before !== history.after;
     });
+    const syncMode = () => {
+        for (const node of modal.querySelectorAll('[data-mode]')) node.setAttribute('aria-pressed', String(node.dataset.mode === mode));
+    };
     const paint = () => {
         if (!pair || !modal?.open) return;
         const current = proseForDiff(pair.message.mes), after = proseForDiff(pair.history.after);
         modal.querySelector('.vrl-diff-body').innerHTML = (current !== after ? '<p class="vrl-diff-notice">正文在净化后又有变化；下面展示当时的净化结果。</p>' : '') + renderComparison(pair.operations, mode);
-        modal.querySelector('[data-mode]').textContent = mode === 'snippet' ? '全文对比' : '只看改动';
     };
     function compare(index) {
         cancel(); pair = null; selected = index;
@@ -88,11 +91,17 @@ export function createDiffViewer({ getContext, eventSource, eventTypes }) {
     function open(index) {
         if (!modal) {
             modal = document.createElement('dialog'); modal.className = 'vrl-dialog vrl-diff-dialog';
-            modal.innerHTML = '<header><div><span class="vrl-eyebrow">普通规则</span><h3>净化对比</h3></div><button type="button" class="vrl-icon" data-close aria-label="关闭净化对比">×</button></header><div class="vrl-diff-toolbar"><select aria-label="选择净化记录"></select><span class="vrl-diff-legend"><span>− 删除</span><span>＋ 新增</span></span><button type="button" data-mode>全文对比</button></div><div class="vrl-diff-body"></div>';
+            modal.innerHTML = `<header><div><span class="vrl-eyebrow">普通规则</span><h3>净化对比</h3></div><button type="button" class="vrl-icon" data-close aria-label="关闭净化对比" title="关闭">${icon('xmark')}</button></header>`
+                + '<div class="vrl-diff-toolbar"><select aria-label="选择净化记录"></select><div class="vrl-segmented" role="group" aria-label="对比范围"><button type="button" data-mode="snippet">只看改动</button><button type="button" data-mode="full">全文对比</button></div><span class="vrl-diff-legend"><span class="vrl-legend-del">原文</span><span class="vrl-legend-ins">替换后</span></span></div><div class="vrl-diff-body"></div>';
             document.body.append(modal);
             modal.querySelector('[data-close]').onclick = () => modal.close();
             modal.querySelector('select').onchange = event => compare(Number(event.target.value));
-            modal.querySelector('[data-mode]').onclick = () => { mode = mode === 'snippet' ? 'full' : 'snippet'; paint(); };
+            modal.querySelector('.vrl-segmented').onclick = event => {
+                const choice = event.target.closest('[data-mode]');
+                if (!choice || choice.dataset.mode === mode) return;
+                mode = choice.dataset.mode; syncMode(); paint();
+            };
+            syncMode();
             modal.addEventListener('close', () => { cancel(); pair = null; });
         }
         selected = Number.isInteger(index) ? index : null;

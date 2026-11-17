@@ -1,28 +1,18 @@
-import { activePreset, clone, exportPreset, id, importPreset, newRule, uniqueName } from './model.js';
+import { activePreset, clone, exportPreset, id, importPreset, newRule, normalizeTheme, uniqueName } from './model.js';
 import { compileRules, validateRule } from './engine.js';
+import { icon } from './icons.js';
 
 const html = value => String(value ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const labels = { text: '普通文本', simple: '简易组合', regex: '正则表达式' };
-const icon = name => {
-    const paths = {
-        plus: '<path d="M12 5v14M5 12h14"/>', xmark: '<path d="m6 6 12 12M6 18 18 6"/>',
-        pen: '<path d="m15 4 5 5M4 20l5-1L20 8a3.5 3.5 0 0 0-5-5L4 14z"/>',
-        'pen-to-square': '<path d="M12 4H5a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2h13a2 2 0 0 0 2-2v-7M17 3l4 4-9 9-5 1 1-5z"/>',
-        'trash-can': '<path d="M3 6h18M9 6V3h6v3M6 6l1 15h10l1-15M10 10v7M14 10v7"/>',
-        'file-import': '<path d="M14 3H5v6M5 16v5h14V8l-5-5v5h5M2 12h10m-4-4 4 4-4 4"/>',
-        'file-export': '<path d="M14 3H5v18h14v-5M14 3v5h5M14 12h8m-4-4 4 4-4 4"/>',
-        filter: '<path d="M3 4h18l-7 8v7l-4 2V12z"/>',
-        'magnifying-glass': '<circle cx="10" cy="10" r="7"/><path d="m15 15 6 6"/>',
-        'ellipsis-vertical': '<circle cx="12" cy="5" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="12" cy="19" r="1"/>',
-        'arrow-up': '<path d="M12 21V3m-7 7 7-7 7 7"/>',
-        'arrow-down': '<path d="M12 3v18m-7-7 7 7 7-7"/>',
-        'arrow-down-up-across-line': '<path d="M7 3v18m-4-4 4 4 4-4M17 21V3m-4 4 4-4 4 4"/>',
-        'rotate-right': '<path d="M20 7v5h-5M20 12a8 8 0 1 0-2 6M20 7l-3 3"/>',
-        gear: '<path d="M10 3h4l.6 2.5 1.7 1 2.5-.7 2 3.4-1.9 1.8v2l1.9 1.8-2 3.4-2.5-.7-1.7 1L14 21h-4l-.6-2.5-1.7-1-2.5.7-2-3.4L5.1 13v-2L3.2 9.2l2-3.4 2.5.7 1.7-1L10 3Z"/><circle cx="12" cy="12" r="3"/>',
-    };
-    return `<svg class="vrl-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${paths[name] || paths.plus}</svg>`;
-};
+const tags = { simple: '组合', regex: '正则' };
 const button = (action, text, extra = '') => `<button type="button" data-action="${action}" ${extra}>${text}</button>`;
+const labelled = (name, text) => `${icon(name)}<span>${text}</span>`;
+
+// The palette is chosen by an attribute on <html>, so every Lite dialog
+// (including the comparison window) follows the same setting.
+export function applyTheme(theme) {
+    document.documentElement.dataset.vrlTheme = normalizeTheme(theme);
+}
 
 function dialog(className, content) {
     const node = document.createElement('dialog');
@@ -43,6 +33,20 @@ export function createUI({ state, save, notify, cleanRecent, showComparison }) {
     const persist = () => { save(); if (main?.open) render(); };
     const cleanupHint = () => `最近 ${state.manualCleanLimit ?? 1} 条助手回复 · 当前 Swipe`;
 
+    function ruleRow(group, rule, error) {
+        const many = rule.replacements.length > 1;
+        return `<div class="vrl-rule-row ${rule.enabled ? '' : 'vrl-rule-off'}" data-rule="${html(rule.id)}">
+            <label class="vrl-check"><input type="checkbox" class="vrl-checkbox" data-toggle-rule="${html(rule.id)}" ${rule.enabled ? 'checked' : ''} aria-label="启用规则 ${html(rule.targets[0])}"></label>
+            <div class="vrl-rule-source"><div class="vrl-rule-text">${tags[rule.mode] ? `<span class="vrl-mode" title="${labels[rule.mode]}">${tags[rule.mode]}</span>` : ''}${html(rule.targets.join(' / '))}</div>${rule.remark ? `<small>${html(rule.remark)}</small>` : ''}${error ? `<small class="vrl-error">${html(error)}</small>` : ''}</div>
+            <span class="vrl-arrow" aria-hidden="true">→</span>
+            <div class="vrl-rule-destination"><div class="vrl-rule-text ${rule.replacements.length ? '' : 'vrl-muted'}">${rule.replacements.length ? html(rule.replacements.join(' / ')) : '删除'}</div>${many ? `<small>随机替换 · ${rule.replacements.length} 个候选</small>` : ''}</div>
+            <div class="vrl-row-actions">
+                ${button('delete-inline-rule', icon('trash-can'), `class="vrl-icon vrl-delete-rule" data-group-id="${html(group.id)}" data-id="${html(rule.id)}" aria-label="删除规则 ${html(rule.targets[0])}" title="删除"`)}
+                ${button('edit-rule', icon('pen'), `class="vrl-icon" data-group-id="${html(group.id)}" data-id="${html(rule.id)}" aria-label="编辑规则 ${html(rule.targets[0])}" title="编辑"`)}
+            </div>
+        </div>`;
+    }
+
     function groupCard(group) {
         const query = search.trim().toLocaleLowerCase();
         const groupMatches = group.name.toLocaleLowerCase().includes(query);
@@ -52,25 +56,18 @@ export function createUI({ state, save, notify, cleanRecent, showComparison }) {
         const visible = query || expanded.has(group.id) ? rows : rows.slice(0, 3);
         const invalid = new Map(compileRules([{ ...group, enabled: true, subRules: group.subRules.map(r => ({...r, enabled: true})) }]).errors.map(error => [group.subRules[error.rule].id, error.message]));
         return `<section class="vrl-card ${group.enabled ? '' : 'vrl-disabled'}" data-group="${html(group.id)}">
-            <div class="vrl-card-head"><label class="vrl-check"><input type="checkbox" data-toggle-group="${html(group.id)}" ${group.enabled ? 'checked' : ''} aria-label="启用分组 ${html(group.name)}"></label>
+            <div class="vrl-card-head"><label class="vrl-check"><input type="checkbox" class="vrl-checkbox" data-toggle-group="${html(group.id)}" ${group.enabled ? 'checked' : ''} aria-label="启用分组 ${html(group.name)}"></label>
                 ${button('edit-group', html(group.name), `class="vrl-group-title" data-id="${html(group.id)}"`)}
                 <span class="vrl-count">${group.subRules.length} 条</span>
-                ${button('add-rule', `${icon('plus')}<span>添加规则</span>`, `class="vrl-small vrl-card-add" data-id="${html(group.id)}"`)}
-                <details class="vrl-menu"><summary aria-label="分组操作">${icon('ellipsis-vertical')}</summary><div>
+                ${button('add-rule', labelled('plus', '添加规则'), `class="vrl-ghost vrl-small vrl-card-add" data-id="${html(group.id)}" aria-label="添加规则"`)}
+                <details class="vrl-menu"><summary aria-label="分组操作" title="分组操作">${icon('ellipsis-vertical')}</summary><div>
                     ${button('edit-group', '编辑分组', `data-id="${html(group.id)}"`)}
                     ${button('copy-group', '复制分组', `data-id="${html(group.id)}"`)}
                     ${button('delete-group', '删除分组', `class="vrl-danger" data-id="${html(group.id)}"`)}
                 </div></details>
             </div>
-            <div class="vrl-rules">${visible.map(rule => `<div class="vrl-rule-row ${rule.enabled ? '' : 'vrl-rule-off'}" data-rule="${html(rule.id)}">
-                <label class="vrl-check"><input type="checkbox" data-toggle-rule="${html(rule.id)}" ${rule.enabled ? 'checked' : ''} aria-label="启用规则 ${html(rule.targets[0])}"></label>
-                <div class="vrl-rule-source"><span class="vrl-mode">${labels[rule.mode]}</span><div>${html(rule.targets.join(' / '))}</div>${rule.remark ? `<small>${html(rule.remark)}</small>` : ''}${invalid.has(rule.id) ? `<small class="vrl-error">${html(invalid.get(rule.id))}</small>` : ''}</div>
-                <span class="vrl-arrow" aria-hidden="true">→</span>
-                <div class="vrl-rule-destination"><span class="vrl-muted">${rule.replacements.length > 1 ? `随机替换 · ${rule.replacements.length} 个候选` : '替换为'}</span><div class="${rule.replacements.length ? '' : 'vrl-muted'}">${rule.replacements.length ? html(rule.replacements.join(' / ')) : '删除'}</div></div>
-                ${button('delete-inline-rule', icon('trash-can'), `class="vrl-icon vrl-delete-rule" data-group-id="${html(group.id)}" data-id="${html(rule.id)}" aria-label="删除规则 ${html(rule.targets[0])}"`)}
-                ${button('edit-rule', icon('pen'), `class="vrl-icon" data-group-id="${html(group.id)}" data-id="${html(rule.id)}" aria-label="编辑规则 ${html(rule.targets[0])}"`)}
-            </div>`).join('') || '<div class="vrl-card-empty">这个分组还没有规则，点击“添加规则”开始。</div>'}</div>
-            ${!query && rows.length > 3 ? button('expand', expanded.has(group.id) ? '收起规则' : `展开其余 ${rows.length - 3} 条规则`, `class="vrl-expand" data-id="${html(group.id)}"`) : ''}
+            <div class="vrl-rules">${visible.map(rule => ruleRow(group, rule, invalid.get(rule.id))).join('') || '<div class="vrl-card-empty">这个分组还没有规则。</div>'}</div>
+            ${!query && rows.length > 3 ? button('expand', expanded.has(group.id) ? '收起' : `展开其余 ${rows.length - 3} 条`, `class="vrl-expand" data-id="${html(group.id)}"`) : ''}
         </section>`;
     }
 
@@ -78,12 +75,13 @@ export function createUI({ state, save, notify, cleanRecent, showComparison }) {
         const area = main.querySelector('#vrl-groups');
         const current = preset();
         if (!current) {
-            area.innerHTML = '<div class="vrl-empty"><span class="vrl-empty-icon">' + icon('filter')
-                + '</span><strong>暂无预设</strong><p>新建预设或导入 JSON 后即可配置规则。</p></div>';
+            area.innerHTML = '<div class="vrl-empty"><strong>暂无预设</strong><p>新建预设，或导入预设 JSON 后开始配置规则。</p></div>';
             return;
         }
         const cards = current.rules.map(groupCard).join('');
-        area.innerHTML = cards || `<div class="vrl-empty"><span class="vrl-empty-icon">${icon(search ? 'magnifying-glass' : 'filter')}</span><strong>${search ? '没有找到匹配的规则' : '从一组简单的替换开始'}</strong><p>${search ? '试试匹配词、替换词或备注。' : '导入现有预设，或添加一个规则分组。'}</p>${search ? '' : button('add-group', `${icon('plus')} 添加规则组`, 'class="vrl-primary"')}</div>`;
+        area.innerHTML = cards || (search
+            ? '<div class="vrl-empty"><strong>没有找到匹配的规则</strong><p>试试匹配词、替换词或备注。</p></div>'
+            : `<div class="vrl-empty"><strong>还没有规则组</strong><p>添加一个规则组，再往里面添加替换规则。</p>${button('add-group', labelled('plus', '添加规则组'))}</div>`);
     }
 
     function render() {
@@ -100,7 +98,10 @@ export function createUI({ state, save, notify, cleanRecent, showComparison }) {
         for (const action of ['rename-preset', 'export', 'delete-preset', 'add-group', 'search', 'edit-groups', 'reverse']) {
             main.querySelector('[data-action="' + action + '"]').disabled = !current;
         }
-        if (!current) main.querySelector('#vrl-search-wrap').hidden = true;
+        if (!current) {
+            main.querySelector('#vrl-search-wrap').hidden = true;
+            main.querySelector('[data-action="search"]').setAttribute('aria-pressed', 'false');
+        }
         renderGroups();
     }
 
@@ -108,16 +109,20 @@ export function createUI({ state, save, notify, cleanRecent, showComparison }) {
         const modal = dialog('vrl-settings-dialog', `<form>
             <header><h3 id="vrl-settings-title">设置</h3></header>
             <div class="vrl-form-body">
-                <label class="vrl-switch">
-                    <input name="showInMagicWand" type="checkbox" role="switch">
-                    <span class="vrl-switch-track" aria-hidden="true"></span>
-                    <span class="vrl-switch-text">显示在魔法棒</span>
-                </label>
-                <div>
-                    <label class="vrl-field">手动净化楼层数
-                        <input name="manualCleanLimit" type="number" min="1" step="1" max="${Number.MAX_SAFE_INTEGER}" inputmode="numeric" placeholder="1" aria-describedby="vrl-clean-limit-hint">
-                    </label>
-                    <p class="vrl-hint" id="vrl-clean-limit-hint">填写正整数。留空时净化最近 1 条助手回复。</p>
+                <div class="vrl-setting">
+                    <div class="vrl-setting-text"><label for="vrl-opt-wand">显示在魔法棒</label><p class="vrl-hint">关闭后从扩展面板进入。</p></div>
+                    <input id="vrl-opt-wand" name="showInMagicWand" type="checkbox" role="switch" class="vrl-toggle">
+                </div>
+                <div class="vrl-setting">
+                    <div class="vrl-setting-text"><label for="vrl-opt-floors">手动净化楼层数</label><p class="vrl-hint" id="vrl-clean-limit-hint">填写正整数。留空时净化最近 1 条助手回复。</p></div>
+                    <input id="vrl-opt-floors" name="manualCleanLimit" class="vrl-number" type="number" min="1" step="1" max="${Number.MAX_SAFE_INTEGER}" inputmode="numeric" placeholder="1" aria-describedby="vrl-clean-limit-hint">
+                </div>
+                <div class="vrl-setting">
+                    <div class="vrl-setting-text"><span id="vrl-theme-label">配色</span><p class="vrl-hint">跟随酒馆时使用当前美化主题的背景、文字和强调色。</p></div>
+                    <div class="vrl-segmented" role="radiogroup" aria-labelledby="vrl-theme-label">
+                        <label><input type="radio" name="theme" value="default"><span>默认</span></label>
+                        <label><input type="radio" name="theme" value="tavern"><span>跟随酒馆</span></label>
+                    </div>
                 </div>
             </div>
             <footer>${button('cancel', '取消')}<button type="submit" class="vrl-primary">保存</button></footer>
@@ -128,11 +133,15 @@ export function createUI({ state, save, notify, cleanRecent, showComparison }) {
         const floorCount = form.elements.manualCleanLimit;
         launcherToggle.checked = state.showInMagicWand;
         floorCount.value = state.manualCleanLimit ?? '';
+        form.elements.theme.value = state.theme;
+        // Preview the palette while choosing; closing without saving restores it.
+        form.addEventListener('change', event => { if (event.target.name === 'theme') applyTheme(event.target.value); });
         modal.querySelector('[data-action="cancel"]').onclick = () => modal.close();
         form.onsubmit = event => {
             event.preventDefault();
             state.showInMagicWand = launcherToggle.checked;
             state.manualCleanLimit = floorCount.value === '' ? null : floorCount.valueAsNumber;
+            state.theme = normalizeTheme(form.elements.theme.value);
             save();
             if (!main.querySelector('[data-action="refresh-body"]').disabled) {
                 const status = main.querySelector('#vrl-refresh-status');
@@ -141,12 +150,12 @@ export function createUI({ state, save, notify, cleanRecent, showComparison }) {
             }
             modal.close();
         };
-        modal.addEventListener('close', () => modal.remove(), { once: true });
+        modal.addEventListener('close', () => { applyTheme(state.theme); modal.remove(); }, { once: true });
         modal.showModal();
     }
 
     function askName(title, initial, commit) {
-        const modal = dialog('vrl-name-dialog', `<form><header><h3>${html(title)}</h3></header><label class="vrl-field">名称<input name="name" required maxlength="120" value="${html(initial)}" autocomplete="off"></label><footer>${button('cancel', '取消')}<button type="submit" class="vrl-primary">保存</button></footer></form>`);
+        const modal = dialog('vrl-name-dialog', `<form><header><h3>${html(title)}</h3></header><div class="vrl-form-body"><label class="vrl-field">名称<input name="name" required maxlength="120" value="${html(initial)}" autocomplete="off"></label></div><footer>${button('cancel', '取消')}<button type="submit" class="vrl-primary">保存</button></footer></form>`);
         modal.querySelector('[data-action="cancel"]').onclick = () => modal.close();
         modal.querySelector('form').onsubmit = event => {
             event.preventDefault();
@@ -164,15 +173,15 @@ export function createUI({ state, save, notify, cleanRecent, showComparison }) {
         if (!group) return;
         const draft = clone(existing || newRule());
         const targetsText = draft.targets.join('\n'), replacementsText = draft.replacements.join('\n');
-        const modal = dialog('vrl-rule-dialog', `<form><header><div><span class="vrl-eyebrow">${html(group.name)}</span><h3>${existing ? '编辑规则' : '添加规则'}</h3></div>${button('close', icon('xmark'), 'class="vrl-icon" aria-label="关闭规则编辑"')}</header>
+        const modal = dialog('vrl-rule-dialog', `<form><header><div><span class="vrl-eyebrow">${html(group.name)}</span><h3>${existing ? '编辑规则' : '添加规则'}</h3></div>${button('close', icon('xmark'), 'class="vrl-icon" aria-label="关闭规则编辑" title="关闭"')}</header>
             <div class="vrl-form-body">
-                <div class="vrl-rule-options"><label class="vrl-field">匹配方式<select name="mode">${Object.entries(labels).map(([key, label]) => `<option value="${key}" ${draft.mode === key ? 'selected' : ''}>${label}</option>`).join('')}</select></label><label class="vrl-check-label"><input type="checkbox" name="enabled" ${draft.enabled ? 'checked' : ''}>启用这条规则</label></div>
+                <div class="vrl-rule-options"><label class="vrl-field">匹配方式<select name="mode">${Object.entries(labels).map(([key, label]) => `<option value="${key}" ${draft.mode === key ? 'selected' : ''}>${label}</option>`).join('')}</select></label><label class="vrl-check-label"><input type="checkbox" class="vrl-checkbox" name="enabled" ${draft.enabled ? 'checked' : ''}>启用这条规则</label></div>
                 <p class="vrl-hint" id="vrl-mode-help"></p>
                 <label class="vrl-field">匹配内容<textarea name="targets" rows="4" required spellcheck="false" placeholder="每行一个匹配项">${html(targetsText)}</textarea></label>
-                <label class="vrl-field">替换内容 <span class="vrl-muted">（留空即删除）</span><textarea name="replacements" rows="3" spellcheck="false" placeholder="每行一个候选；多个候选会在每次命中时随机选择">${html(replacementsText)}</textarea></label>
-                <label class="vrl-field">备注 <span class="vrl-muted">（可选）</span><input name="remark" maxlength="300" value="${html(draft.remark)}" placeholder="给自己看的简短说明"></label>
+                <label class="vrl-field">替换内容 <span class="vrl-muted">留空即删除</span><textarea name="replacements" rows="3" spellcheck="false" placeholder="每行一个候选；多个候选会在每次命中时随机选择">${html(replacementsText)}</textarea></label>
+                <label class="vrl-field">备注 <span class="vrl-muted">可选</span><input name="remark" maxlength="300" value="${html(draft.remark)}" placeholder="给自己看的简短说明"></label>
                 <p class="vrl-error" id="vrl-rule-error" role="alert"></p>
-            </div><footer>${existing ? button('delete-rule', `${icon('trash-can')} 删除规则`, 'class="vrl-danger vrl-push-left"') : ''}${button('close', '取消')}<button type="submit" class="vrl-primary">保存规则</button></footer></form>`);
+            </div><footer>${existing ? button('delete-rule', '删除', 'class="vrl-ghost vrl-danger vrl-push-left"') : ''}${button('close', '取消')}<button type="submit" class="vrl-primary">保存规则</button></footer></form>`);
         const form = modal.querySelector('form');
         const help = () => { modal.querySelector('#vrl-mode-help').textContent = {
             text: '按原样匹配文字，每行一项。标点和空格也属于匹配内容。',
@@ -207,9 +216,9 @@ export function createUI({ state, save, notify, cleanRecent, showComparison }) {
     }
 
     function editGroups(focusId) {
-        const modal = dialog('vrl-groups-dialog', `<header><h3>编辑分组</h3>${button('close', icon('xmark'), 'class="vrl-icon" aria-label="关闭分组编辑"')}</header><div class="vrl-group-editor"></div><footer><span class="vrl-muted vrl-push-left">修改后自动保存</span>${button('close', '完成', 'class="vrl-primary"')}</footer>`);
+        const modal = dialog('vrl-groups-dialog', `<header><h3>编辑分组</h3>${button('close', icon('xmark'), 'class="vrl-icon" aria-label="关闭分组编辑" title="关闭"')}</header><div class="vrl-group-editor"></div><footer><span class="vrl-muted vrl-push-left">修改后自动保存</span>${button('close', '完成', 'class="vrl-primary"')}</footer>`);
         const list = modal.querySelector('.vrl-group-editor');
-        const renderList = () => { list.innerHTML = preset().rules.map((group, index) => `<div class="vrl-group-edit-row" data-id="${html(group.id)}"><label class="vrl-check"><input type="checkbox" data-group-toggle ${group.enabled ? 'checked' : ''} aria-label="启用分组 ${html(group.name)}"></label><input value="${html(group.name)}" maxlength="120" aria-label="分组名称"><span class="vrl-count">${group.subRules.length} 条</span>${button('up', icon('arrow-up'), `class="vrl-icon" aria-label="上移分组" ${index === 0 ? 'disabled' : ''}`)}${button('down', icon('arrow-down'), `class="vrl-icon" aria-label="下移分组" ${index === preset().rules.length - 1 ? 'disabled' : ''}`)}${button('remove', icon('trash-can'), 'class="vrl-icon vrl-danger" aria-label="删除分组"')}</div>`).join('') || '<p class="vrl-hint">还没有分组。</p>'; };
+        const renderList = () => { list.innerHTML = preset().rules.map((group, index) => `<div class="vrl-group-edit-row" data-id="${html(group.id)}"><label class="vrl-check"><input type="checkbox" class="vrl-checkbox" data-group-toggle ${group.enabled ? 'checked' : ''} aria-label="启用分组 ${html(group.name)}"></label><input value="${html(group.name)}" maxlength="120" aria-label="分组名称"><span class="vrl-count">${group.subRules.length} 条</span><div class="vrl-row-actions">${button('up', icon('arrow-up'), `class="vrl-icon" aria-label="上移分组" title="上移" ${index === 0 ? 'disabled' : ''}`)}${button('down', icon('arrow-down'), `class="vrl-icon" aria-label="下移分组" title="下移" ${index === preset().rules.length - 1 ? 'disabled' : ''}`)}${button('remove', icon('trash-can'), 'class="vrl-icon vrl-delete-rule" aria-label="删除分组" title="删除"')}</div></div>`).join('') || '<p class="vrl-hint vrl-card-empty">还没有分组。</p>'; };
         renderList();
         list.onchange = event => {
             const row = event.target.closest('[data-id]'), group = groupById(row?.dataset.id);
@@ -296,7 +305,11 @@ export function createUI({ state, save, notify, cleanRecent, showComparison }) {
         if (action === 'add-group') askName('添加规则组', '新分组', name => { preset().rules.push({ id: id(), name, enabled: true, subRules: [] }); persist(); });
         if (action === 'edit-group' || action === 'edit-groups') editGroups(target.dataset.id);
         if (action === 'reverse') { preset().rules.reverse(); persist(); }
-        if (action === 'search') { main.querySelector('#vrl-search-wrap').hidden = !main.querySelector('#vrl-search-wrap').hidden; if (!main.querySelector('#vrl-search-wrap').hidden) main.querySelector('#vrl-search').focus(); else { search = ''; main.querySelector('#vrl-search').value = ''; renderGroups(); } }
+        if (action === 'search') {
+            const wrap = main.querySelector('#vrl-search-wrap');
+            wrap.hidden = !wrap.hidden; target.setAttribute('aria-pressed', String(!wrap.hidden));
+            if (!wrap.hidden) main.querySelector('#vrl-search').focus(); else { search = ''; main.querySelector('#vrl-search').value = ''; renderGroups(); }
+        }
         if (action === 'clear-search') { search = ''; main.querySelector('#vrl-search').value = ''; renderGroups(); main.querySelector('#vrl-search').focus(); }
         if (action === 'expand') { expanded.has(target.dataset.id) ? expanded.delete(target.dataset.id) : expanded.add(target.dataset.id); renderGroups(); }
         if (action === 'add-rule') editRule(target.dataset.id);
@@ -314,22 +327,42 @@ export function createUI({ state, save, notify, cleanRecent, showComparison }) {
     function open() {
         if (!main) {
             main = dialog('vrl-main-dialog', `<header class="vrl-main-header">
-                <div class="vrl-brand"><span class="vrl-brand-mark">${icon('filter')}</span><div><h2>词汇净化 <span>Lite</span></h2><p>管理预设和替换规则</p></div></div>
+                <div class="vrl-title"><h2>词汇净化</h2><span>Lite</span></div>
                 <div class="vrl-header-actions">
                     <label class="vrl-switch" title="新回复完成后自动净化。关闭后仍可立即净化。">
-                        <input id="vrl-enabled" type="checkbox" role="switch">
-                        <span class="vrl-switch-track" aria-hidden="true"></span>
                         <span class="vrl-switch-text">自动净化</span>
+                        <input id="vrl-enabled" type="checkbox" role="switch" class="vrl-toggle">
                     </label>
+                    <span class="vrl-divider" aria-hidden="true"></span>
                     ${button('settings', icon('gear'), 'class="vrl-icon" aria-label="设置" title="设置"')}
-                    ${button('close', icon('xmark'), 'class="vrl-icon" aria-label="关闭词汇净化"')}
+                    ${button('close', icon('xmark'), 'class="vrl-icon" aria-label="关闭词汇净化" title="关闭"')}
                 </div>
             </header>
-                <div class="vrl-main-scroll"><section class="vrl-preset-section"><div class="vrl-preset-bar"><label class="vrl-preset-label" for="vrl-preset">当前预设</label><select id="vrl-preset" aria-label="当前预设"></select><span id="vrl-stats" class="vrl-muted"></span><div class="vrl-preset-actions">
-                    ${button('new-preset', `${icon('plus')} 新建`)}${button('rename-preset', `${icon('pen-to-square')} 重命名`)}${button('import', `${icon('file-import')} 导入`)}${button('export', `${icon('file-export')} 导出`)}${button('delete-preset', `${icon('trash-can')} 删除`, 'class="vrl-danger"')}
-                </div></div></section><section class="vrl-rules-section"><div class="vrl-section-title"><h3>规则集</h3><div class="vrl-rule-actions">${button('add-group', `${icon('plus')} 添加`, 'class="vrl-primary"')}${button('search', `${icon('magnifying-glass')} 搜索`)}${button('edit-groups', `${icon('pen-to-square')} 编辑分组`)}${button('reverse', `${icon('arrow-down-up-across-line')} 反序排列`)}</div></div>
-                    <div id="vrl-search-wrap" class="vrl-search" hidden><input id="vrl-search" type="search" placeholder="搜索匹配词、替换词、备注或分组" aria-label="搜索规则">${button('clear-search', icon('xmark'), 'class="vrl-icon" aria-label="清空搜索"')}</div>
-                    <div id="vrl-groups"></div></section></div><footer class="vrl-main-footer"><div class="vrl-refresh-control"><div class="vrl-clean-actions">${button('refresh-body', `${icon('rotate-right')} 立即净化`, 'class="vrl-primary" title="按设置的楼层数净化最近的助手回复，只处理当前 Swipe"')}${button('show-comparison', '查看改动', 'title="查看最近十楼的净化前后对比"')}</div><span id="vrl-refresh-status" role="status">${cleanupHint()}</span></div><div class="vrl-footer-meta"><span id="vrl-saved">自动保存</span><a href="https://github.com/The-Veridis-Lion/Veridis-Rewrite" target="_blank" rel="noopener noreferrer">基于 Veridis Rewrite</a></div></footer><input type="file" id="vrl-file" accept="application/json,.json" hidden>`);
+            <div class="vrl-main-scroll">
+                <section class="vrl-preset-bar">
+                    <label class="vrl-preset-label" for="vrl-preset">预设</label>
+                    <select id="vrl-preset" aria-label="当前预设"></select>
+                    <div class="vrl-preset-actions">${button('new-preset', '新建')}${button('rename-preset', '重命名')}${button('import', '导入')}${button('export', '导出')}${button('delete-preset', '删除', 'class="vrl-danger"')}</div>
+                </section>
+                <section class="vrl-rules-section">
+                    <div class="vrl-section-head">
+                        <div class="vrl-section-title"><h3>规则</h3><span id="vrl-stats"></span></div>
+                        <div class="vrl-rule-actions">
+                            ${button('search', labelled('magnifying-glass', '搜索'), 'class="vrl-ghost" aria-label="搜索规则" aria-pressed="false" title="搜索规则"')}
+                            ${button('edit-groups', labelled('list', '编辑分组'), 'class="vrl-ghost" aria-label="编辑分组" title="编辑分组"')}
+                            ${button('reverse', labelled('arrow-down-up', '反序'), 'class="vrl-ghost" aria-label="反序排列分组" title="反序排列分组"')}
+                            ${button('add-group', labelled('plus', '添加规则组'), 'aria-label="添加规则组" title="添加规则组"')}
+                        </div>
+                    </div>
+                    <div id="vrl-search-wrap" class="vrl-search" hidden><input id="vrl-search" type="search" placeholder="搜索匹配词、替换词、备注或分组" aria-label="搜索规则">${button('clear-search', icon('xmark'), 'class="vrl-icon" aria-label="清空搜索" title="清空"')}</div>
+                    <div id="vrl-groups"></div>
+                </section>
+            </div>
+            <footer class="vrl-main-footer">
+                <div class="vrl-clean-actions">${button('refresh-body', '立即净化', 'class="vrl-primary" title="按设置的楼层数净化最近的助手回复，只处理当前 Swipe"')}${button('show-comparison', '查看改动', 'title="查看最近十楼的净化前后对比"')}</div>
+                <span id="vrl-refresh-status" role="status">${cleanupHint()}</span>
+                <div class="vrl-footer-meta"><span id="vrl-saved">自动保存</span><span aria-hidden="true">·</span><a href="https://github.com/The-Veridis-Lion/Veridis-Rewrite" target="_blank" rel="noopener noreferrer">基于 Veridis Rewrite</a></div>
+            </footer><input type="file" id="vrl-file" accept="application/json,.json" hidden>`);
             main.addEventListener('click', event => { const target = event.target.closest('button[data-action]'); if (target && !target.disabled) handleAction(target.dataset.action, target); });
             main.addEventListener('change', event => {
                 const input = event.target;
